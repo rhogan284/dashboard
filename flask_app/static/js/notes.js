@@ -14,11 +14,16 @@
   }
 
   async function save(content) {
-    await fetch('/api/notes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-    });
+    try {
+      const response = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+    } catch (err) {
+      console.error('Failed to save notes:', err.message);
+    }
   }
 
   textarea.addEventListener('input', () => {
