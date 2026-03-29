@@ -5,7 +5,7 @@ const path = require('path');
 let flaskProcess = null;
 let mainWindow = null;
 
-const FLASK_PORT = 5000;
+const FLASK_PORT = 8001;
 const FLASK_URL = `http://localhost:${FLASK_PORT}`;
 
 function startFlask() {

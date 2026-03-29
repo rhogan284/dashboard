@@ -38,4 +38,4 @@ def create_app(config: dict | None = None) -> Flask:
 
 if __name__ == '__main__':
     application = create_app()
-    application.run(port=5000, debug=False)
+    application.run(port=8001, debug=False)

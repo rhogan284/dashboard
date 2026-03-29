@@ -5,9 +5,8 @@ from flask import Blueprint, Response, request, stream_with_context
 llm_bp = Blueprint('llm', __name__)
 
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'llama3')
+DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
 ALLOWED_MODELS = {DEFAULT_MODEL, 'llama3', 'mistral', 'gemma', 'phi3', 'codellama'}
-
 
 @llm_bp.route('/api/chat', methods=['POST'])
 def chat() -> Response:

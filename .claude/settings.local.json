@@ -6,7 +6,16 @@
       "Bash(python3 -m venv .venv)",
       "Bash(source .venv/bin/activate)",
       "Bash(pip install:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(gh pr:*)",
+      "Bash(lsof -ti:5000)",
+      "Bash(xargs kill:*)",
+      "Bash(git add:*)",
+      "Bash(/dev/null cd:*)",
+      "Bash(pytest tests/test_llm.py -v)",
+      "Bash(pytest tests/test_todos.py -v)",
+      "Bash(pytest tests/test_notes.py -v)",
+      "Bash(pytest tests/ -v)"
     ]
   }
 }
