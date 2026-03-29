@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/electron\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/routes\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/templates\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/static/js\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/tests\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/data\")",
+      "Bash(touch \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/routes/__init__.py\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/tests/__init__.py\")",
+      "Bash(python3 -m venv .venv)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(pip install:*)",
+      "Bash(npm install:*)"
+    ]
+  }
+}
