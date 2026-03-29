@@ -36,6 +36,38 @@
     });
   }
 
+  function getISOBoundaries() {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    // Day of week: 0=Sun,1=Mon,...,6=Sat — convert to ISO (0=Mon,...,6=Sun)
+    const dow = (now.getDay() + 6) % 7; // 0=Mon, 6=Sun
+    const daysToSunday = 6 - dow;
+
+    const endOfThisWeek = new Date(now);
+    endOfThisWeek.setDate(now.getDate() + daysToSunday);
+    const endOfThisWeekStr = endOfThisWeek.toISOString().split('T')[0];
+
+    const startOfNextWeek = new Date(endOfThisWeek);
+    startOfNextWeek.setDate(endOfThisWeek.getDate() + 1);
+    const startOfNextWeekStr = startOfNextWeek.toISOString().split('T')[0];
+
+    const endOfNextWeek = new Date(startOfNextWeek);
+    endOfNextWeek.setDate(startOfNextWeek.getDate() + 6);
+    const endOfNextWeekStr = endOfNextWeek.toISOString().split('T')[0];
+
+    return { todayStr, endOfThisWeekStr, startOfNextWeekStr, endOfNextWeekStr };
+  }
+
+  function classifyEvent(event, boundaries) {
+    const key = getStartKey(event);
+    const { todayStr, endOfThisWeekStr, startOfNextWeekStr, endOfNextWeekStr } = boundaries;
+    if (key === todayStr) return 'today';
+    if (key > todayStr && key <= endOfThisWeekStr) return 'this_week';
+    if (key >= startOfNextWeekStr && key <= endOfNextWeekStr) return 'next_week';
+    return null;
+  }
+
   function renderEvents(events) {
     eventsEl.innerHTML = '';
     if (!events.length) {
