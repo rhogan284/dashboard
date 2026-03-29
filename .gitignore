@@ -35,6 +35,4 @@ electron/node_modules/
 
 # Env
 .env
-
-# Docs
-docs
+!/docs/
