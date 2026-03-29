@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' }
+  </script>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+</head>
+<body class="bg-gray-950 text-white h-screen flex flex-col overflow-hidden">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800 shrink-0">
+    <span class="font-semibold text-lg tracking-tight">Dashboard</span>
+    <nav class="flex gap-1">
+      <a href="/" class="text-sm px-3 py-1.5 rounded-md bg-gray-700 text-white">Home</a>
+    </nav>
+  </header>
+
+  <!-- 3-column layout -->
+  <main class="flex-1 grid grid-cols-[1fr_1.5fr_1fr] overflow-hidden">
+
+    <!-- Left: Calendar -->
+    <div class="overflow-y-auto border-r border-gray-800 px-5 py-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-gray-400 text-xs uppercase tracking-widest">Calendar</h2>
+        <button id="calendar-refresh" class="text-gray-500 hover:text-white text-xs transition-colors hidden">Refresh</button>
+      </div>
+      <button id="calendar-connect" class="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors">
+        Connect Google Calendar
+      </button>
+      <p id="calendar-loading" class="text-gray-500 text-sm hidden">Loading events…</p>
+      <p id="calendar-error" class="text-red-400 text-sm hidden"></p>
+      <div id="calendar-events" class="space-y-5 hidden"></div>
+    </div>
+
+    <!-- Center: Clock + LLM -->
+    <div class="overflow-y-auto px-6 py-6 flex flex-col gap-6">
+
+      <!-- Clock -->
+      <div class="text-center py-8">
+        <p id="clock-date" class="text-gray-400 text-base mb-3 tracking-wide"></p>
+        <p id="clock-time" class="text-white text-7xl font-mono font-light tracking-tight"></p>
+      </div>
+
+      <!-- LLM Prompt -->
+      <div class="flex flex-col gap-3">
+        <div class="flex gap-2 items-end">
+          <textarea
+            id="llm-input"
+            placeholder="Ask anything… (Enter to send, Shift+Enter for newline)"
+            rows="3"
+            class="flex-1 bg-gray-800 text-white rounded-lg px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
+          ></textarea>
+          <button id="llm-submit"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
+            Send
+          </button>
+        </div>
+        <p id="llm-error" class="text-red-400 text-sm hidden"></p>
+        <div id="llm-response"
+          class="bg-gray-800 rounded-lg px-4 py-3 text-sm text-gray-200 whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed hidden">
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Todos + Notes -->
+    <div class="overflow-y-auto border-l border-gray-800 px-5 py-6 flex flex-col gap-6">
+
+      <!-- Todos -->
+      <div>
+        <h2 class="text-gray-400 text-xs uppercase tracking-widest mb-3">To-Do</h2>
+        <div class="flex gap-2 mb-4">
+          <input id="todo-input" placeholder="Add a task…"
+            class="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500" />
+          <button id="todo-add"
+            class="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
+            Add
+          </button>
+        </div>
+        <ul id="todo-list" class="space-y-2"></ul>
+      </div>
+
+      <!-- Notes -->
+      <div>
+        <h2 class="text-gray-400 text-xs uppercase tracking-widest mb-3">Notes</h2>
+        <textarea id="notes-textarea" placeholder="Freeform notes…"
+          class="w-full bg-gray-800 text-white rounded-lg px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500 min-h-48">
+        </textarea>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Inject server-side config for JS -->
+  <script>const GOOGLE_CLIENT_ID = "{{ google_client_id }}";</script>
+  <script src="/static/js/clock.js"></script>
+  <script src="/static/js/llm.js"></script>
+  <script src="/static/js/todos.js"></script>
+  <script src="/static/js/notes.js"></script>
+  <script src="/static/js/calendar.js"></script>
+</body>
+</html>

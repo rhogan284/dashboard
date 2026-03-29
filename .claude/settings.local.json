@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/electron\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/routes\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/templates\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/static/js\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/tests\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/data\")",
+      "Bash(touch \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/routes/__init__.py\" \"/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/tests/__init__.py\")",
+      "Bash(python3 -m venv .venv)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(pip install:*)",
+      "Bash(npm install:*)",
+      "Bash(gh pr:*)",
+      "Bash(lsof -ti:5000)",
+      "Bash(xargs kill:*)",
+      "Bash(git add:*)",
+      "Bash(/dev/null cd:*)",
+      "Bash(pytest tests/test_llm.py -v)",
+      "Bash(pytest tests/test_todos.py -v)",
+      "Bash(pytest tests/test_notes.py -v)",
+      "Bash(pytest tests/ -v)"
+    ]
+  }
+}
