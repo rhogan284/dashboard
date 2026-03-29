@@ -1,3 +1,5 @@
+import os
+import tempfile
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
@@ -18,6 +20,14 @@ def get_notes():
 @notes_bp.route('/api/notes', methods=['POST'])
 def save_notes():
     data = request.get_json(silent=True) or {}
-    content = data.get('content', '')
-    _notes_file().write_text(content)
+    content = str(data.get('content', ''))
+    f = _notes_file()
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=f.parent, suffix='.tmp')
+    try:
+        with os.fdopen(tmp_fd, 'w') as fh:
+            fh.write(content)
+        os.replace(tmp_path, f)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
     return jsonify({'ok': True})

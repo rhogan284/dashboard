@@ -43,34 +43,54 @@
   }
 
   async function loadTodos() {
-    const response = await fetch('/api/todos');
-    renderTodos(await response.json());
+    try {
+      const response = await fetch('/api/todos');
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      renderTodos(await response.json());
+    } catch (err) {
+      console.error('Failed to load todos:', err.message);
+    }
   }
 
   async function addTodo() {
     const text = input.value.trim();
     if (!text) return;
-    await fetch('/api/todos', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    input.value = '';
-    loadTodos();
+    try {
+      const response = await fetch('/api/todos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      input.value = '';
+      loadTodos();
+    } catch (err) {
+      console.error('Failed to add todo:', err.message);
+    }
   }
 
   async function toggleTodo(id, completed) {
-    await fetch(`/api/todos/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ completed }),
-    });
-    loadTodos();
+    try {
+      const response = await fetch(`/api/todos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed }),
+      });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      loadTodos();
+    } catch (err) {
+      console.error('Failed to toggle todo:', err.message);
+    }
   }
 
   async function deleteTodo(id) {
-    await fetch(`/api/todos/${id}`, { method: 'DELETE' });
-    loadTodos();
+    try {
+      const response = await fetch(`/api/todos/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      loadTodos();
+    } catch (err) {
+      console.error('Failed to delete todo:', err.message);
+    }
   }
 
   addBtn.addEventListener('click', addTodo);

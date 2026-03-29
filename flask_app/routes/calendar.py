@@ -40,6 +40,7 @@ def save_token():
     f = _token_file()
     f.parent.mkdir(exist_ok=True)
     f.write_text(json.dumps(token_data))
+    os.chmod(f, 0o600)
     return jsonify({'ok': True})
 
 

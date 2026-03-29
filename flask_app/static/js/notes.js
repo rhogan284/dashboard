@@ -3,9 +3,14 @@
   let timer = null;
 
   async function load() {
-    const response = await fetch('/api/notes');
-    const data = await response.json();
-    textarea.value = data.content;
+    try {
+      const response = await fetch('/api/notes');
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      const data = await response.json();
+      textarea.value = data.content;
+    } catch (err) {
+      console.error('Failed to load notes:', err.message);
+    }
   }
 
   async function save(content) {
