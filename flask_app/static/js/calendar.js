@@ -68,38 +68,71 @@
     return null;
   }
 
-  function renderEvents(events) {
-    eventsEl.innerHTML = '';
-    if (!events.length) {
-      eventsEl.innerHTML = '<p class="text-gray-500 text-sm">No upcoming events</p>';
-      return;
+  function renderDayGroup(dateStr, dayEvents, showDayLabel) {
+    const group = document.createElement('div');
+    if (showDayLabel) {
+      const label = document.createElement('p');
+      label.className = 'text-gray-400 text-xs font-semibold mb-1.5';
+      label.textContent = formatDayLabel(dateStr);
+      group.appendChild(label);
     }
+    const ul = document.createElement('ul');
+    ul.className = 'space-y-1.5';
+    for (const event of dayEvents) {
+      const li = document.createElement('li');
+      li.className = 'flex gap-2 text-sm';
+      li.innerHTML = `
+        <span class="text-gray-500 w-16 shrink-0 tabular-nums">${formatTime(event)}</span>
+        <span class="text-white leading-snug">${escapeHtml(event.summary || '')}</span>
+      `;
+      ul.appendChild(li);
+    }
+    group.appendChild(ul);
+    return group;
+  }
+
+  function renderSection(label, events) {
+    const section = document.createElement('div');
+    const header = document.createElement('p');
+    header.className = 'text-gray-400 text-xs uppercase tracking-widest mb-2';
+    header.textContent = label;
+    section.appendChild(header);
+
+    const isToday = label === 'Today';
     const grouped = new Map();
     for (const event of events) {
       const key = getStartKey(event);
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key).push(event);
     }
+    const inner = document.createElement('div');
+    inner.className = 'space-y-3 mb-4';
     for (const [dateStr, dayEvents] of grouped) {
-      const group = document.createElement('div');
-      const label = document.createElement('p');
-      label.className = 'text-gray-400 text-xs font-semibold mb-1.5';
-      label.textContent = formatDayLabel(dateStr);
-      group.appendChild(label);
-      const ul = document.createElement('ul');
-      ul.className = 'space-y-1.5';
-      for (const event of dayEvents) {
-        const li = document.createElement('li');
-        li.className = 'flex gap-2 text-sm';
-        li.innerHTML = `
-          <span class="text-gray-500 w-16 shrink-0 tabular-nums">${formatTime(event)}</span>
-          <span class="text-white leading-snug">${escapeHtml(event.summary || '')}</span>
-        `;
-        ul.appendChild(li);
-      }
-      group.appendChild(ul);
-      eventsEl.appendChild(group);
+      inner.appendChild(renderDayGroup(dateStr, dayEvents, !isToday));
     }
+    section.appendChild(inner);
+    return section;
+  }
+
+  function renderEvents(events) {
+    eventsEl.innerHTML = '';
+    const boundaries = getISOBoundaries();
+    const buckets = { today: [], this_week: [], next_week: [] };
+
+    for (const event of events) {
+      const bucket = classifyEvent(event, boundaries);
+      if (bucket) buckets[bucket].push(event);
+    }
+
+    const hasAny = buckets.today.length || buckets.this_week.length || buckets.next_week.length;
+    if (!hasAny) {
+      eventsEl.innerHTML = '<p class="text-gray-500 text-sm">No upcoming events</p>';
+      return;
+    }
+
+    if (buckets.today.length)     eventsEl.appendChild(renderSection('Today', buckets.today));
+    if (buckets.this_week.length) eventsEl.appendChild(renderSection('This Week', buckets.this_week));
+    if (buckets.next_week.length) eventsEl.appendChild(renderSection('Next Week', buckets.next_week));
   }
 
   function showConnectState() {
