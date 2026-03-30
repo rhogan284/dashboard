@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, redirect, request, Response
@@ -14,7 +15,10 @@ SCOPES = [
     'https://www.googleapis.com/auth/calendar.readonly',
 ]
 
-REDIRECT_URI = 'http://localhost:8001/api/brief/oauth/callback'
+_REDIRECT_URI = 'http://localhost:8001/api/brief/oauth/callback'
+_POST_AUTH_REDIRECT = 'http://localhost:8001/?brief_connected=1'
+
+_PREVIEW_PLACEHOLDER = '<html><body style="font-family:sans-serif;padding:40px;color:#666"><p>No brief generated yet.</p></body></html>'
 
 
 def _data_dir() -> Path:
@@ -38,6 +42,17 @@ def _project_root() -> Path:
     return Path(current_app.root_path).parent
 
 
+def _gmail_connected() -> bool:
+    f = _token_file()
+    if not f.exists():
+        return False
+    try:
+        data = json.loads(f.read_text())
+        return bool(data.get('refresh_token'))
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
 @brief_bp.route('/api/brief/status', methods=['GET'])
 def get_status():
     default = {
@@ -57,7 +72,7 @@ def get_status():
     else:
         data = dict(default)
 
-    data['gmail_connected'] = _token_file().exists()
+    data['gmail_connected'] = _gmail_connected()
     return jsonify(data)
 
 
@@ -65,6 +80,9 @@ def get_status():
 def generate_brief():
     project_root = _project_root()
     script_path = project_root / 'scripts' / 'morning_brief.py'
+
+    if not script_path.exists():
+        return jsonify({'started': False, 'error': f'script not found: {script_path}'}), 500
 
     try:
         subprocess.Popen(
@@ -89,7 +107,7 @@ def get_auth_url():
         flow = Flow.from_client_secrets_file(
             str(client_secret),
             scopes=SCOPES,
-            redirect_uri=REDIRECT_URI,
+            redirect_uri=_REDIRECT_URI,
         )
         auth_url, _ = flow.authorization_url(
             access_type='offline',
@@ -112,7 +130,7 @@ def oauth_callback():
         flow = Flow.from_client_secrets_file(
             str(client_secret),
             scopes=SCOPES,
-            redirect_uri=REDIRECT_URI,
+            redirect_uri=_REDIRECT_URI,
         )
         flow.fetch_token(code=code)
         creds = flow.credentials
@@ -128,12 +146,19 @@ def oauth_callback():
 
         token_file = _token_file()
         token_file.parent.mkdir(exist_ok=True)
-        token_file.write_text(json.dumps(token_data))
-        os.chmod(token_file, 0o600)
+        fd, tmp = tempfile.mkstemp(dir=token_file.parent)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(token_data, f)
+            os.replace(tmp, token_file)
+            os.chmod(token_file, 0o600)
+        except Exception:
+            os.unlink(tmp)
+            raise
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 
-    return redirect('http://localhost:8001/?brief_connected=1')
+    return redirect(_POST_AUTH_REDIRECT)
 
 
 @brief_bp.route('/api/brief/preview', methods=['GET'])
@@ -144,8 +169,8 @@ def preview_brief():
         try:
             html = preview_file.read_text()
         except OSError:
-            html = '<html><body style="font-family:sans-serif;padding:40px;color:#666"><p>No brief generated yet.</p></body></html>'
+            html = _PREVIEW_PLACEHOLDER
     else:
-        html = '<html><body style="font-family:sans-serif;padding:40px;color:#666"><p>No brief generated yet.</p></body></html>'
+        html = _PREVIEW_PLACEHOLDER
 
     return Response(html, content_type='text/html')
