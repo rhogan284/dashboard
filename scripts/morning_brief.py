@@ -522,6 +522,40 @@ Return ONLY a valid JSON object with exactly these three keys:
     return _call_ollama(prompt)
 
 
+MARKET_JSON_KEYS = (
+    'US_CLOSE_DATE, SP500_LEVEL, SP500_PCT, SP500_COLOUR, '
+    'NASDAQ_LEVEL, NASDAQ_PCT, NASDAQ_COLOUR, '
+    'DOW_LEVEL, DOW_PCT, DOW_COLOUR, '
+    'VIX, VIX_INTERPRETATION, SECTOR_MOVERS, MARKET_THEMES, '
+    'AUD_RATE, AUD_PCT, AUD_ARROW, AUD_COLOUR, AUD_CONTEXT, '
+    'ASX_OPEN, ASX_COLOUR, ASX_CONTEXT, ASX_WATCH, '
+    'HOLDINGS_CONTENT, WEEK_EVENTS_TABLE, HOLDINGS_EARNINGS'
+)
+
+ACTIVE_HOLDINGS = 'SHLD, AVGO, CRDO, URA, CIBR, IBIT, AMPX, KRKNF, OSS, ASX:GOLD'
+
+
+def summarise_markets(search_results: dict, today_str: str) -> dict:
+    """Call Ollama to summarise market/holdings data. Returns dict with market section values."""
+    prompt = f"""You are processing market and news data for Ryan Hogan's morning brief.
+Today is {today_str}. Ryan's active holdings: {ACTIVE_HOLDINGS}.
+
+Return ONLY a valid JSON object with exactly these keys:
+{MARKET_JSON_KEYS}
+
+Rules:
+- Colour fields: use #22c55e (positive/green) or #ef4444 (negative/red)
+- AUD_ARROW: ↑ or ↓
+- HOLDINGS_CONTENT: HTML <div> block per holding with ticker + one-line news + signal badge (🟢 Positive / 🔴 Negative / 🟡 Watch / ⚪ No news)
+- WEEK_EVENTS_TABLE: HTML <tr> rows only, no <table> wrapper
+- HOLDINGS_EARNINGS: plain text, one holding per line
+
+=== MARKET & NEWS DATA ===
+{format_search_results(search_results)}
+"""
+    return _call_ollama(prompt)
+
+
 def compose_brief(gmail_data: dict, calendar_data: list, search_results: dict, today_str: str) -> str:
     """Send all data to Qwen3.5 via Ollama and return the completed HTML."""
     prompt = f"""You are generating a personalised morning brief email for Ryan Hogan.

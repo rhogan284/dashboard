@@ -136,3 +136,43 @@ def test_summarise_gmail_returns_required_keys():
     assert result['UNREAD_COUNT'] == '3'
     assert 'ACTION_ITEMS' in result
     assert 'OTHER_EMAILS_LIST' in result
+
+
+def test_summarise_markets_returns_required_keys():
+    """summarise_markets returns dict with all market/holdings keys."""
+    import sys, os
+    from unittest.mock import patch
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+    from morning_brief import summarise_markets
+
+    fake_response = {
+        'US_CLOSE_DATE': 'Friday 28 Mar',
+        'SP500_LEVEL': '5,580', 'SP500_PCT': '-1.1%', 'SP500_COLOUR': '#ef4444',
+        'NASDAQ_LEVEL': '17,322', 'NASDAQ_PCT': '-1.6%', 'NASDAQ_COLOUR': '#ef4444',
+        'DOW_LEVEL': '41,583', 'DOW_PCT': '-0.7%', 'DOW_COLOUR': '#ef4444',
+        'VIX': '21.7', 'VIX_INTERPRETATION': 'Elevated caution',
+        'SECTOR_MOVERS': 'Energy +0.4%', 'MARKET_THEMES': 'Tariff fears',
+        'AUD_RATE': '0.6281', 'AUD_PCT': '-0.4%', 'AUD_ARROW': '↓',
+        'AUD_COLOUR': '#ef4444', 'AUD_CONTEXT': 'Risk-off',
+        'ASX_OPEN': '-0.6%', 'ASX_COLOUR': '#ef4444', 'ASX_CONTEXT': 'SPI lower',
+        'ASX_WATCH': 'BHP ex-div',
+        'HOLDINGS_CONTENT': '<div>AVGO — No news</div>',
+        'WEEK_EVENTS_TABLE': '<tr><td>Mon</td><td>PCE</td><td>Inflation</td></tr>',
+        'HOLDINGS_EARNINGS': 'AVGO: 11 Jun',
+    }
+
+    import morning_brief
+    with patch.object(morning_brief, '_call_ollama', return_value=fake_response):
+        result = summarise_markets({}, 'Monday, March 30, 2026')
+
+    required_keys = [
+        'US_CLOSE_DATE', 'SP500_LEVEL', 'SP500_PCT', 'SP500_COLOUR',
+        'NASDAQ_LEVEL', 'NASDAQ_PCT', 'NASDAQ_COLOUR',
+        'DOW_LEVEL', 'DOW_PCT', 'DOW_COLOUR',
+        'VIX', 'VIX_INTERPRETATION', 'SECTOR_MOVERS', 'MARKET_THEMES',
+        'AUD_RATE', 'AUD_PCT', 'AUD_ARROW', 'AUD_COLOUR', 'AUD_CONTEXT',
+        'ASX_OPEN', 'ASX_COLOUR', 'ASX_CONTEXT', 'ASX_WATCH',
+        'HOLDINGS_CONTENT', 'WEEK_EVENTS_TABLE', 'HOLDINGS_EARNINGS',
+    ]
+    for key in required_keys:
+        assert key in result, f'Missing key: {key}'
