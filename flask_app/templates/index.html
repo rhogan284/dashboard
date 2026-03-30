@@ -20,8 +20,14 @@
     </nav>
   </header>
 
+  <!-- Tab navigation -->
+  <nav id="tab-bar" class="bg-gray-900 border-b border-gray-800 px-4 flex gap-1 pt-2 shrink-0">
+    <button data-tab="dashboard" class="tab-btn px-4 py-2 text-sm rounded-t-md text-white bg-gray-700 border-b-2 border-blue-500">Dashboard</button>
+    <button data-tab="brief" class="tab-btn px-4 py-2 text-sm rounded-t-md text-gray-400 hover:text-white transition-colors">Morning Brief</button>
+  </nav>
+
   <!-- 3-column layout -->
-  <main class="flex-1 grid grid-cols-[1fr_1.5fr_1fr] overflow-hidden">
+  <main id="tab-dashboard" class="flex-1 grid grid-cols-[1fr_1.5fr_1fr] overflow-hidden">
 
     <!-- Left: Calendar -->
     <div class="overflow-y-auto border-r border-gray-800 px-5 py-6">
@@ -95,6 +101,57 @@
     </div>
   </main>
 
+  <!-- Morning Brief tab -->
+  <div id="tab-brief" class="hidden flex-1 overflow-y-auto bg-gray-950">
+    <div class="max-w-3xl mx-auto px-6 py-8">
+
+      <!-- Page title + generate button -->
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-xl font-semibold text-white">Morning Brief</h1>
+        <button id="brief-generate-btn"
+          class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
+          Generate Now
+        </button>
+      </div>
+
+      <!-- Status bar -->
+      <div id="brief-status-bar" class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 flex items-center gap-3">
+        <div id="brief-status-icon" class="text-lg">⏳</div>
+        <div>
+          <div id="brief-status-text" class="text-sm text-gray-300">No brief generated yet.</div>
+          <div id="brief-status-time" class="text-xs text-gray-500 mt-0.5"></div>
+        </div>
+      </div>
+
+      <!-- Gmail connect banner (visible when not connected) -->
+      <div id="brief-connect-banner" class="hidden bg-yellow-900/30 border border-yellow-700 rounded-xl p-4 mb-4 flex items-center justify-between">
+        <div>
+          <div class="text-sm font-medium text-yellow-300">Gmail not connected</div>
+          <div class="text-xs text-yellow-500 mt-0.5">Connect your Gmail account to generate morning briefs.</div>
+        </div>
+        <button id="brief-connect-btn"
+          class="ml-4 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white text-sm rounded-lg transition-colors shrink-0">
+          Connect Gmail
+        </button>
+      </div>
+
+      <!-- Collapsible preview -->
+      <details id="brief-preview-section" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <summary class="px-5 py-3 text-sm font-medium text-gray-300 cursor-pointer select-none hover:text-white transition-colors list-none flex items-center justify-between">
+          <span>Preview last brief</span>
+          <span class="text-gray-500 text-xs" id="brief-preview-toggle-hint">▶ expand</span>
+        </summary>
+        <iframe id="brief-preview-frame"
+          src="/api/brief/preview"
+          sandbox="allow-same-origin"
+          class="w-full border-0 border-t border-gray-800"
+          style="height: 800px;">
+        </iframe>
+      </details>
+
+    </div>
+  </div>
+
   <!-- Inject server-side config for JS -->
   <script>const GOOGLE_CLIENT_ID = "{{ google_client_id }}";</script>
   <script src="/static/js/clock.js"></script>
@@ -102,5 +159,6 @@
   <script src="/static/js/todos.js"></script>
   <script src="/static/js/notes.js"></script>
   <script src="/static/js/calendar.js"></script>
+  <script src="/static/js/morning_brief.js"></script>
 </body>
 </html>
