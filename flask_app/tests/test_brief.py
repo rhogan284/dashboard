@@ -114,3 +114,24 @@ def test_format_week_events_empty():
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
     from morning_brief import format_week_events
     assert format_week_events([]) == '(no events this week)'
+
+
+def test_summarise_gmail_returns_required_keys():
+    """summarise_gmail returns dict with UNREAD_COUNT, ACTION_ITEMS, OTHER_EMAILS_LIST."""
+    import sys, os
+    from unittest.mock import patch
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+    from morning_brief import summarise_gmail
+
+    fake_response = {
+        'UNREAD_COUNT': '3',
+        'ACTION_ITEMS': '<div>Reply to John</div>',
+        'OTHER_EMAILS_LIST': '<div>Newsletter</div>',
+    }
+
+    with patch('morning_brief._call_ollama', return_value=fake_response):
+        result = summarise_gmail({'messages': [], 'unread_count': 3})
+
+    assert result['UNREAD_COUNT'] == '3'
+    assert 'ACTION_ITEMS' in result
+    assert 'OTHER_EMAILS_LIST' in result

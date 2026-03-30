@@ -508,6 +508,20 @@ def _call_ollama(prompt: str) -> dict:
         raise ValueError(f'Ollama returned invalid JSON: {exc}\nRaw output (first 500 chars): {raw[:500]}') from exc
 
 
+def summarise_gmail(gmail_data: dict) -> dict:
+    """Call Ollama to summarise Gmail data. Returns dict with email section values."""
+    prompt = f"""You are processing emails for Ryan Hogan's morning brief.
+Return ONLY a valid JSON object with exactly these three keys:
+- UNREAD_COUNT: string, the number of unread emails
+- ACTION_ITEMS: HTML string — <div> blocks for emails needing a reply or action. Empty string if none.
+- OTHER_EMAILS_LIST: HTML string — one <div> per other notable email, format: <div>📧 <strong>Sender</strong> — one line summary.</div>
+
+=== GMAIL ({gmail_data['unread_count']} unread) ===
+{format_messages(gmail_data['messages'])}
+"""
+    return _call_ollama(prompt)
+
+
 def compose_brief(gmail_data: dict, calendar_data: list, search_results: dict, today_str: str) -> str:
     """Send all data to Qwen3.5 via Ollama and return the completed HTML."""
     prompt = f"""You are generating a personalised morning brief email for Ryan Hogan.
