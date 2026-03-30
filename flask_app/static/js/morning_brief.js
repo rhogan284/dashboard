@@ -13,7 +13,7 @@
       if (!el) return;
       el.classList.toggle('hidden', key !== name);
       // flex-1 must be on the active tab so it fills available space
-      el.classList.toggle('flex-1', key !== name ? false : true);
+      el.classList.toggle('flex-1', key === name);
     });
     tabBtns.forEach(btn => {
       const active = btn.dataset.tab === name;
@@ -24,6 +24,15 @@
       btn.classList.toggle('text-gray-400', !active);
       btn.classList.toggle('bg-transparent', !active);
     });
+    // Fetch status only when on brief tab; clear interval on dashboard
+    if (name === 'brief') {
+      fetchStatus();
+    } else {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    }
   }
 
   tabBtns.forEach(btn => {
@@ -49,7 +58,7 @@
   }
 
   function applyStatus(data) {
-    connectBanner.classList.toggle('hidden', data.gmail_connected !== false);
+    connectBanner.classList.toggle('hidden', data.gmail_connected === true);
 
     const icons = { success: '✅', error: '❌', running: '⏳', never_run: '⏳' };
     const texts = {
@@ -69,7 +78,10 @@
   async function fetchStatus() {
     try {
       const res = await fetch('/api/brief/status');
-      if (!res.ok) return;
+      if (!res.ok) {
+        statusText.textContent = 'Could not reach the brief service.';
+        return;
+      }
       const data = await res.json();
       const newGeneratedAt = data.generated_at;
 
@@ -143,6 +155,4 @@
   } else {
     activateTab('dashboard');
   }
-
-  fetchStatus();
 })();
