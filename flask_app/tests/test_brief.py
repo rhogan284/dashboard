@@ -69,14 +69,14 @@ def test_brief_preview_serves_existing_file(client, app):
     assert b'Test brief content' in response.data
 
 
-def test_format_today_events_returns_today_only(monkeypatch):
+def test_format_today_events_returns_today_only():
     """format_today_events returns only events starting today."""
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
     from morning_brief import format_today_events
-    from datetime import date
+    from datetime import date, timedelta
     today = date.today().isoformat()
-    tomorrow = (date.today() + __import__('datetime').timedelta(days=1)).isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     events = [
         {'summary': 'Today meeting', 'start': {'date': today}},
         {'summary': 'Tomorrow event', 'start': {'date': tomorrow}},
@@ -93,13 +93,13 @@ def test_format_today_events_empty():
     assert format_today_events([]) == '(nothing scheduled today)'
 
 
-def test_format_week_events_excludes_today(monkeypatch):
+def test_format_week_events_excludes_today():
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
     from morning_brief import format_week_events
-    from datetime import date
+    from datetime import date, timedelta
     today = date.today().isoformat()
-    tomorrow = (date.today() + __import__('datetime').timedelta(days=1)).isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     events = [
         {'summary': 'Today meeting', 'start': {'date': today}},
         {'summary': 'Tomorrow event', 'start': {'date': tomorrow}},

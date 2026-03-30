@@ -15,9 +15,11 @@ import os
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
+
+import httpx
 
 from dotenv import load_dotenv
 
@@ -318,7 +320,6 @@ def format_messages(messages: list) -> str:
 
 def format_today_events(events: list) -> str:
     """Return plain-text list of events starting today."""
-    from datetime import date
     today = date.today().isoformat()
     lines = []
     for event in events:
@@ -334,10 +335,9 @@ def format_today_events(events: list) -> str:
 
 def format_week_events(events: list) -> str:
     """Return plain-text list of events after today through end of 7-day window."""
-    from datetime import date
     today = date.today().isoformat()
     lines = []
-    for event in events[:15]:
+    for event in events:
         start = event.get('start', {})
         start_str = start.get('date', start.get('dateTime', ''))
         if start_str.startswith(today):
@@ -345,6 +345,8 @@ def format_week_events(events: list) -> str:
         summary = event.get('summary', '(no title)')[:60]
         day_str = start_str[:10]
         lines.append(f'- {day_str} {summary}')
+        if len(lines) >= 15:
+            break
     return '\n'.join(lines) if lines else '(no events this week)'
 
 
@@ -476,8 +478,6 @@ def search_tavily(client, query: str) -> dict:
 
 def _call_ollama(prompt: str) -> dict:
     """Make a single non-streaming Ollama call and return parsed JSON dict."""
-    import httpx
-
     ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
     model = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
 
@@ -498,13 +498,18 @@ def _call_ollama(prompt: str) -> dict:
         raw = raw.split('\n', 1)[-1]
         raw = raw.rsplit('```', 1)[0].strip()
 
-    return json.loads(raw)
+    # Strip <think>...</think> reasoning blocks (Qwen3 thinking mode)
+    if '<think>' in raw:
+        raw = raw.split('</think>', 1)[-1].strip()
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'Ollama returned invalid JSON: {exc}\nRaw output (first 500 chars): {raw[:500]}') from exc
 
 
 def compose_brief(gmail_data: dict, calendar_data: list, search_results: dict, today_str: str) -> str:
     """Send all data to Qwen3.5 via Ollama and return the completed HTML."""
-    import httpx
-
     prompt = f"""You are generating a personalised morning brief email for Ryan Hogan.
 Today is {today_str}.
 
