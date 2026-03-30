@@ -3,23 +3,40 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PLIST_SRC="$PROJECT_ROOT/launchd/com.dashboard.morningbrief.plist"
+VENV_PYTHON="$PROJECT_ROOT/flask_app/.venv/bin/python"
+VENV_BIN="$PROJECT_ROOT/flask_app/.venv/bin"
+SCRIPT_PATH="$PROJECT_ROOT/scripts/morning_brief.py"
+PLIST_TEMPLATE="$PROJECT_ROOT/launchd/com.dashboard.morningbrief.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/com.dashboard.morningbrief.plist"
+LABEL="com.dashboard.morningbrief"
 
-# Unload existing job if it's already loaded
-if launchctl list | grep -q "com.dashboard.morningbrief"; then
+# Unload existing job if already registered
+if launchctl list 2>/dev/null | grep -q "$LABEL"; then
   echo "Unloading existing job..."
-  launchctl unload "$PLIST_DST" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 fi
 
-# Copy plist to LaunchAgents
+# Substitute template placeholders with real paths
 mkdir -p "$HOME/Library/LaunchAgents"
-cp "$PLIST_SRC" "$PLIST_DST"
+sed \
+  -e "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" \
+  -e "s|__VENV_PYTHON__|$VENV_PYTHON|g" \
+  -e "s|__SCRIPT_PATH__|$SCRIPT_PATH|g" \
+  -e "s|__HOME__|$HOME|g" \
+  -e "s|__VENV_PYTHON_DIR__|$VENV_BIN|g" \
+  "$PLIST_TEMPLATE" > "$PLIST_DST"
+
 chmod 644 "$PLIST_DST"
 
-# Load the job
-launchctl load "$PLIST_DST"
+# Load using modern launchctl bootstrap
+launchctl bootstrap "gui/$(id -u)" "$PLIST_DST"
 
-echo "✓ Morning Brief scheduled for 7:00 AM Mon–Fri"
-echo "  Logs: ~/Library/Logs/morning_brief.log"
-echo "  To unload: launchctl unload $PLIST_DST"
+# Verify registration
+if launchctl list 2>/dev/null | grep -q "$LABEL"; then
+  echo "✓ Morning Brief scheduled for 7:00 AM Mon–Fri"
+  echo "  Logs: ~/Library/Logs/morning_brief.log"
+  echo "  To unload: launchctl bootout gui/\$(id -u)/$LABEL"
+else
+  echo "WARNING: job does not appear in launchctl list — check for errors above."
+  exit 1
+fi
