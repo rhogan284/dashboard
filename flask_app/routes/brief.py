@@ -84,10 +84,22 @@ def generate_brief():
     if not script_path.exists():
         return jsonify({'started': False, 'error': f'script not found: {script_path}'}), 500
 
+    # Prevent concurrent runs
+    status_path = _status_file()
+    if status_path.exists():
+        try:
+            current = json.loads(status_path.read_text())
+            if current.get('status') == 'running':
+                return jsonify({'started': False, 'error': 'already running'}), 409
+        except (json.JSONDecodeError, OSError):
+            pass
+
     try:
         subprocess.Popen(
             [sys.executable, str(script_path)],
             cwd=str(project_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
     except Exception as exc:
         return jsonify({'started': False, 'error': str(exc)}), 500

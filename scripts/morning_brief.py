@@ -15,7 +15,7 @@ import os
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
 
@@ -445,8 +445,8 @@ def fetch_calendar(creds) -> list:
     from googleapiclient.discovery import build
 
     service = build('calendar', 'v3', credentials=creds)
-    now = datetime.utcnow().isoformat() + 'Z'
-    end = (datetime.utcnow() + timedelta(days=7)).isoformat() + 'Z'
+    now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + 'Z'
+    end = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7)).isoformat() + 'Z'
     result = service.events().list(
         calendarId='primary',
         timeMin=now,
@@ -581,7 +581,7 @@ def main():
     # Write "running" status immediately so the UI can reflect progress
     write_json(DATA_DIR / 'brief_status.json', {
         'status': 'running',
-        'generated_at': datetime.utcnow().isoformat(),
+        'generated_at': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         'draft_id': None,
         'error': None,
         'gmail_connected': True,
@@ -616,7 +616,7 @@ def main():
     # Write success status
     write_json(DATA_DIR / 'brief_status.json', {
         'status': 'success',
-        'generated_at': datetime.utcnow().isoformat(),
+        'generated_at': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         'draft_id': draft_id,
         'error': None,
         'gmail_connected': True,
@@ -634,7 +634,7 @@ if __name__ == '__main__':
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         write_json(DATA_DIR / 'brief_status.json', {
             'status': 'error',
-            'generated_at': datetime.utcnow().isoformat(),
+            'generated_at': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             'draft_id': None,
             'error': str(e),
             'gmail_connected': True,

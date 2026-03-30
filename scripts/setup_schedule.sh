@@ -10,6 +10,13 @@ PLIST_TEMPLATE="$PROJECT_ROOT/launchd/com.dashboard.morningbrief.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/com.dashboard.morningbrief.plist"
 LABEL="com.dashboard.morningbrief"
 
+# Verify venv Python exists
+if [ ! -f "$VENV_PYTHON" ]; then
+  echo "ERROR: Python venv not found at $VENV_PYTHON"
+  echo "  Run: python3 -m venv flask_app/.venv && flask_app/.venv/bin/pip install -r flask_app/requirements.txt"
+  exit 1
+fi
+
 # Unload existing job if already registered
 if launchctl list 2>/dev/null | grep -q "$LABEL"; then
   echo "Unloading existing job..."
