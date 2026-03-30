@@ -176,3 +176,39 @@ def test_summarise_markets_returns_required_keys():
     ]
     for key in required_keys:
         assert key in result, f'Missing key: {key}'
+
+
+def test_assemble_html_substitutes_all_placeholders():
+    """assemble_html fills all {{KEY}} placeholders in a minimal template."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+    from morning_brief import assemble_html
+
+    gmail_values = {
+        'UNREAD_COUNT': '5',
+        'ACTION_ITEMS': '<div>Reply to boss</div>',
+        'OTHER_EMAILS_LIST': '<div>Newsletter</div>',
+    }
+    market_values = {
+        'US_CLOSE_DATE': 'Friday 28 Mar',
+        'SP500_LEVEL': '5,580', 'SP500_PCT': '-1.1%', 'SP500_COLOUR': '#ef4444',
+        'NASDAQ_LEVEL': '17,322', 'NASDAQ_PCT': '-1.6%', 'NASDAQ_COLOUR': '#ef4444',
+        'DOW_LEVEL': '41,583', 'DOW_PCT': '-0.7%', 'DOW_COLOUR': '#ef4444',
+        'VIX': '21.7', 'VIX_INTERPRETATION': 'Elevated',
+        'SECTOR_MOVERS': 'Tech -2%', 'MARKET_THEMES': 'Tariffs',
+        'AUD_RATE': '0.6281', 'AUD_PCT': '-0.4%', 'AUD_ARROW': '↓',
+        'AUD_COLOUR': '#ef4444', 'AUD_CONTEXT': 'Risk-off',
+        'ASX_OPEN': '-0.6%', 'ASX_COLOUR': '#ef4444', 'ASX_CONTEXT': 'Lower',
+        'ASX_WATCH': 'BHP ex-div',
+        'HOLDINGS_CONTENT': '<div>AVGO ⚪</div>',
+        'WEEK_EVENTS_TABLE': '<tr><td>PCE</td></tr>',
+        'HOLDINGS_EARNINGS': 'AVGO: Jun 11',
+    }
+    calendar_data = []
+
+    html = assemble_html(gmail_values, market_values, calendar_data, 'Monday, March 30, 2026')
+
+    assert '{{' not in html, 'Unfilled placeholders remain in output'
+    assert 'Monday, March 30, 2026' in html
+    assert '5,580' in html
+    assert 'Reply to boss' in html

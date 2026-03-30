@@ -556,48 +556,28 @@ Rules:
     return _call_ollama(prompt)
 
 
-def compose_brief(gmail_data: dict, calendar_data: list, search_results: dict, today_str: str) -> str:
-    """Send all data to Qwen3.5 via Ollama and return the completed HTML."""
-    prompt = f"""You are generating a personalised morning brief email for Ryan Hogan.
-Today is {today_str}.
+def assemble_html(
+    gmail_values: dict,
+    market_values: dict,
+    calendar_data: list,
+    today_str: str,
+) -> str:
+    """Merge all values and substitute into HTML_TEMPLATE. No Ollama call."""
+    short_date = datetime.now().strftime('%d %b')
 
-Fill in the HTML template below by replacing EVERY {{{{PLACEHOLDER}}}} with real content from the data provided.
-Do NOT change any HTML structure, CSS, inline styles, or class names.
-Return ONLY the completed HTML — no markdown, no explanation.
+    calendar_values = {
+        'FULL_DATE': today_str,
+        'SHORT_DATE': short_date,
+        'TODAY_EVENTS': format_today_events(calendar_data),
+        'WEEK_EVENTS': format_week_events(calendar_data),
+    }
 
-=== GMAIL DATA ===
-Unread count: {gmail_data['unread_count']}
-Messages:
-{format_messages(gmail_data['messages'])}
+    values = {**gmail_values, **market_values, **calendar_values}
 
-=== CALENDAR DATA ===
-Today:
-{format_today_events(calendar_data)}
-
-This week:
-{format_week_events(calendar_data)}
-
-=== MARKET & NEWS DATA ===
-{format_search_results(search_results)}
-
-=== HTML TEMPLATE ===
-{HTML_TEMPLATE}
-"""
-
-    ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-    model = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
-
-    response = httpx.post(
-        f'{ollama_url}/api/chat',
-        json={
-            'model': model,
-            'messages': [{'role': 'user', 'content': prompt}],
-            'stream': False,
-        },
-        timeout=300.0,  # 5 minute timeout for large generation
-    )
-    response.raise_for_status()
-    return response.json()['message']['content']
+    html = HTML_TEMPLATE
+    for key, value in values.items():
+        html = html.replace('{{' + key + '}}', str(value))
+    return html
 
 
 # ---------------------------------------------------------------------------
@@ -689,9 +669,15 @@ def main():
     calendar_data = calendar_future.result()
     search_results = {q: f.result() for q, f in search_futures.items()}
 
-    # Compose with Qwen via Ollama
-    print('Composing brief with Qwen3.5…', flush=True)
-    html_content = compose_brief(gmail_data, calendar_data, search_results, today_str)
+    # Summarise with Qwen via Ollama (two sequential focused calls)
+    print('Summarising Gmail with Qwen3.5…', flush=True)
+    gmail_values = summarise_gmail(gmail_data)
+
+    print('Summarising markets with Qwen3.5…', flush=True)
+    market_values = summarise_markets(search_results, today_str)
+
+    print('Assembling HTML…', flush=True)
+    html_content = assemble_html(gmail_values, market_values, calendar_data, today_str)
 
     # Create Gmail draft
     draft_id = create_draft(creds, html_content, today_str)
