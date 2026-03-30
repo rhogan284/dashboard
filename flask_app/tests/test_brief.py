@@ -67,3 +67,50 @@ def test_brief_preview_serves_existing_file(client, app):
     response = client.get('/api/brief/preview')
     assert response.status_code == 200
     assert b'Test brief content' in response.data
+
+
+def test_format_today_events_returns_today_only(monkeypatch):
+    """format_today_events returns only events starting today."""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+    from morning_brief import format_today_events
+    from datetime import date
+    today = date.today().isoformat()
+    tomorrow = (date.today() + __import__('datetime').timedelta(days=1)).isoformat()
+    events = [
+        {'summary': 'Today meeting', 'start': {'date': today}},
+        {'summary': 'Tomorrow event', 'start': {'date': tomorrow}},
+    ]
+    result = format_today_events(events)
+    assert 'Today meeting' in result
+    assert 'Tomorrow event' not in result
+
+
+def test_format_today_events_empty():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+    from morning_brief import format_today_events
+    assert format_today_events([]) == '(nothing scheduled today)'
+
+
+def test_format_week_events_excludes_today(monkeypatch):
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+    from morning_brief import format_week_events
+    from datetime import date
+    today = date.today().isoformat()
+    tomorrow = (date.today() + __import__('datetime').timedelta(days=1)).isoformat()
+    events = [
+        {'summary': 'Today meeting', 'start': {'date': today}},
+        {'summary': 'Tomorrow event', 'start': {'date': tomorrow}},
+    ]
+    result = format_week_events(events)
+    assert 'Tomorrow event' in result
+    assert 'Today meeting' not in result
+
+
+def test_format_week_events_empty():
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+    from morning_brief import format_week_events
+    assert format_week_events([]) == '(no events this week)'

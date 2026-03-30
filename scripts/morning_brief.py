@@ -316,34 +316,36 @@ def format_messages(messages: list) -> str:
     return '\n'.join(lines).rstrip()
 
 
-def format_calendar(events: list) -> str:
-    """Format calendar events as structured text for the LLM prompt."""
-    if not events:
-        return '(no upcoming events)'
+def format_today_events(events: list) -> str:
+    """Return plain-text list of events starting today."""
+    from datetime import date
+    today = date.today().isoformat()
     lines = []
     for event in events:
-        summary = event.get('summary', '(no title)')
         start = event.get('start', {})
-        start_str = start.get('dateTime', start.get('date', ''))
-        end = event.get('end', {})
-        end_str = end.get('dateTime', end.get('date', ''))
-        location = event.get('location', '')
-        description = event.get('description', '')
+        start_str = start.get('date', start.get('dateTime', ''))
+        if not start_str.startswith(today):
+            continue
+        summary = event.get('summary', '(no title)')[:60]
+        time_str = start_str[11:16] if 'T' in start_str else 'all day'
+        lines.append(f'- {time_str} {summary}')
+    return '\n'.join(lines) if lines else '(nothing scheduled today)'
 
-        lines.append(f'- {summary}')
-        if start_str:
-            lines.append(f'  Start: {start_str}')
-        if end_str and end_str != start_str:
-            lines.append(f'  End: {end_str}')
-        if location:
-            lines.append(f'  Location: {location}')
-        if description:
-            # Truncate long descriptions
-            desc_short = description[:200].replace('\n', ' ')
-            if len(description) > 200:
-                desc_short += '...'
-            lines.append(f'  Notes: {desc_short}')
-    return '\n'.join(lines)
+
+def format_week_events(events: list) -> str:
+    """Return plain-text list of events after today through end of 7-day window."""
+    from datetime import date
+    today = date.today().isoformat()
+    lines = []
+    for event in events[:15]:
+        start = event.get('start', {})
+        start_str = start.get('date', start.get('dateTime', ''))
+        if start_str.startswith(today):
+            continue  # skip today — handled by format_today_events
+        summary = event.get('summary', '(no title)')[:60]
+        day_str = start_str[:10]
+        lines.append(f'- {day_str} {summary}')
+    return '\n'.join(lines) if lines else '(no events this week)'
 
 
 def format_search_results(search_results: dict) -> str:
@@ -472,6 +474,33 @@ def search_tavily(client, query: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _call_ollama(prompt: str) -> dict:
+    """Make a single non-streaming Ollama call and return parsed JSON dict."""
+    import httpx
+
+    ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    model = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
+
+    response = httpx.post(
+        f'{ollama_url}/api/chat',
+        json={
+            'model': model,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'stream': False,
+        },
+        timeout=300.0,
+    )
+    response.raise_for_status()
+    raw = response.json()['message']['content'].strip()
+
+    # Strip markdown code fences if model wraps output
+    if raw.startswith('```'):
+        raw = raw.split('\n', 1)[-1]
+        raw = raw.rsplit('```', 1)[0].strip()
+
+    return json.loads(raw)
+
+
 def compose_brief(gmail_data: dict, calendar_data: list, search_results: dict, today_str: str) -> str:
     """Send all data to Qwen3.5 via Ollama and return the completed HTML."""
     import httpx
@@ -489,7 +518,11 @@ Messages:
 {format_messages(gmail_data['messages'])}
 
 === CALENDAR DATA ===
-{format_calendar(calendar_data)}
+Today:
+{format_today_events(calendar_data)}
+
+This week:
+{format_week_events(calendar_data)}
 
 === MARKET & NEWS DATA ===
 {format_search_results(search_results)}
