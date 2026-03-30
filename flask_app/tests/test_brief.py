@@ -1,0 +1,69 @@
+import json
+import pytest
+
+
+def test_brief_status_default_when_no_file(client):
+    """Returns never_run default when brief_status.json doesn't exist."""
+    response = client.get('/api/brief/status')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['status'] == 'never_run'
+    assert data['generated_at'] is None
+    assert data['draft_id'] is None
+    assert data['error'] is None
+    assert data['gmail_connected'] is False
+
+
+def test_brief_status_reads_existing_file(client, app):
+    """Returns data from brief_status.json when it exists."""
+    status = {
+        'status': 'success',
+        'generated_at': '2026-03-29T07:00:00',
+        'draft_id': 'draft_abc123',
+        'error': None,
+    }
+    status_file = app.config['DATA_DIR'] / 'brief_status.json'
+    status_file.write_text(json.dumps(status))
+
+    response = client.get('/api/brief/status')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['status'] == 'success'
+    assert data['draft_id'] == 'draft_abc123'
+
+
+def test_brief_status_gmail_connected_when_token_exists(client, app):
+    """gmail_connected is True when brief_token.json contains a refresh_token."""
+    token = {
+        'token': 'access_token',
+        'refresh_token': 'refresh_token_value',
+        'token_uri': 'https://oauth2.googleapis.com/token',
+        'client_id': 'client_id',
+        'client_secret': 'client_secret',
+        'scopes': ['https://www.googleapis.com/auth/gmail.readonly'],
+    }
+    token_file = app.config['DATA_DIR'] / 'brief_token.json'
+    token_file.write_text(json.dumps(token))
+
+    response = client.get('/api/brief/status')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['gmail_connected'] is True
+
+
+def test_brief_preview_returns_placeholder_when_no_file(client):
+    """Returns placeholder HTML when morning_brief_preview.html doesn't exist."""
+    response = client.get('/api/brief/preview')
+    assert response.status_code == 200
+    assert b'No brief generated yet' in response.data
+
+
+def test_brief_preview_serves_existing_file(client, app):
+    """Serves morning_brief_preview.html when it exists."""
+    preview_html = '<html><body>Test brief content</body></html>'
+    preview_file = app.config['DATA_DIR'] / 'morning_brief_preview.html'
+    preview_file.write_text(preview_html)
+
+    response = client.get('/api/brief/preview')
+    assert response.status_code == 200
+    assert b'Test brief content' in response.data
