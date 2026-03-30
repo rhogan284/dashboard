@@ -51,7 +51,7 @@ def get_events():
         return jsonify({'error': 'not_connected'}), 401
 
     now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-    end = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 7 * 86400))
+    end = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 14 * 86400))
 
     response = httpx.get(
         f'{CALENDAR_API}/calendars/primary/events',

@@ -48,7 +48,7 @@ def test_chat_uses_default_model_when_omitted(client):
     with patch('routes.llm.httpx.Client', return_value=mock_client):
         client.post('/api/chat', json={'prompt': 'Hello'})
 
-    assert captured['json']['model'] == 'llama3'
+    assert captured['json']['model'] == 'qwen3.5:latest'
 
 
 def test_chat_missing_prompt_returns_400(client):
