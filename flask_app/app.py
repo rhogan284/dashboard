@@ -20,11 +20,13 @@ def create_app(config: dict | None = None) -> Flask:
     from routes.todos import todos_bp
     from routes.notes import notes_bp
     from routes.calendar import calendar_bp
+    from routes.brief import brief_bp
 
     app.register_blueprint(llm_bp)
     app.register_blueprint(todos_bp)
     app.register_blueprint(notes_bp)
     app.register_blueprint(calendar_bp)
+    app.register_blueprint(brief_bp)
 
     @app.route('/')
     def index():
