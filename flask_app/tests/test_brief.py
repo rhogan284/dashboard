@@ -129,7 +129,8 @@ def test_summarise_gmail_returns_required_keys():
         'OTHER_EMAILS_LIST': '<div>Newsletter</div>',
     }
 
-    with patch('morning_brief._call_ollama', return_value=fake_response):
+    import morning_brief
+    with patch.object(morning_brief, '_call_ollama', return_value=fake_response):
         result = summarise_gmail({'messages': [], 'unread_count': 3})
 
     assert result['UNREAD_COUNT'] == '3'

@@ -516,8 +516,8 @@ Return ONLY a valid JSON object with exactly these three keys:
 - ACTION_ITEMS: HTML string — <div> blocks for emails needing a reply or action. Empty string if none.
 - OTHER_EMAILS_LIST: HTML string — one <div> per other notable email, format: <div>📧 <strong>Sender</strong> — one line summary.</div>
 
-=== GMAIL ({gmail_data['unread_count']} unread) ===
-{format_messages(gmail_data['messages'])}
+=== GMAIL ({gmail_data.get('unread_count', 0)} unread) ===
+{format_messages(gmail_data.get('messages', []))}
 """
     return _call_ollama(prompt)
 
