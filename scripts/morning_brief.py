@@ -1,4 +1,4 @@
-#!/Users/ryanhogan/Desktop/Coding Work/Dashboard/flask_app/.venv/bin/python
+#!/usr/bin/env python3
 """Morning brief generation script.
 
 Fetches Gmail, Calendar, and market/news data in parallel, composes an HTML
@@ -233,6 +233,9 @@ HTML_TEMPLATE = """\
 </body>
 </html>"""
 
+# Maximum number of Gmail messages to fetch; balances LLM prompt size vs coverage
+MAX_MESSAGES = 8
+
 # ---------------------------------------------------------------------------
 # Tavily search queries
 # ---------------------------------------------------------------------------
@@ -283,9 +286,8 @@ def load_credentials():
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
         # Write back updated token
-        updated = json.loads(token_path.read_text())
-        updated['token'] = creds.token
-        token_path.write_text(json.dumps(updated))
+        data['token'] = creds.token
+        write_json(token_path, data)
     return creds
 
 
@@ -405,7 +407,7 @@ def fetch_gmail(creds, yesterday_date: str) -> dict:
 
     messages = []
     unread_count = 0
-    for mid in message_ids[:8]:
+    for mid in message_ids[:MAX_MESSAGES]:
         try:
             msg = service.users().messages().get(
                 userId='me', id=mid, format='full'
@@ -589,7 +591,7 @@ def main():
     tavily_client = TavilyClient(api_key=os.getenv('TAVILY_API_KEY', ''))
 
     # Fetch all data in parallel
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=len(TAVILY_QUERIES) + 2) as executor:
         gmail_future = executor.submit(fetch_gmail, creds, yesterday_date)
         calendar_future = executor.submit(fetch_calendar, creds)
         search_futures = {
