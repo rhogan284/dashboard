@@ -52,6 +52,10 @@ function createWindow() {
     },
   });
 
+  // Strip "Electron/x.x.x" from the UA so Google OAuth doesn't block the popup
+  const ua = mainWindow.webContents.getUserAgent().replace(/\s*Electron\/[\d.]+/, '');
+  mainWindow.webContents.setUserAgent(ua);
+
   mainWindow.loadURL(FLASK_URL);
 
   mainWindow.on('closed', () => {

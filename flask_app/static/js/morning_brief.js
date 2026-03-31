@@ -12,7 +12,6 @@
     Object.entries(tabs).forEach(([key, el]) => {
       if (!el) return;
       el.classList.toggle('hidden', key !== name);
-      // flex-1 must be on the active tab so it fills available space
       el.classList.toggle('flex-1', key === name);
     });
     tabBtns.forEach(btn => {
@@ -24,7 +23,6 @@
       btn.classList.toggle('text-gray-400', !active);
       btn.classList.toggle('bg-transparent', !active);
     });
-    // Fetch status only when on brief tab; clear interval on dashboard
     if (name === 'brief') {
       fetchStatus();
     } else {
@@ -40,13 +38,16 @@
   });
 
   // ── Status polling ───────────────────────────────────────────────────────────
-  const statusIcon = document.getElementById('brief-status-icon');
-  const statusText = document.getElementById('brief-status-text');
-  const statusTime = document.getElementById('brief-status-time');
-  const connectBanner = document.getElementById('brief-connect-banner');
-  const generateBtn = document.getElementById('brief-generate-btn');
-  const previewFrame = document.getElementById('brief-preview-frame');
-  const previewToggleHint = document.getElementById('brief-preview-toggle-hint');
+  const statusIcon      = document.getElementById('brief-status-icon');
+  const statusText      = document.getElementById('brief-status-text');
+  const statusTime      = document.getElementById('brief-status-time');
+  const generateBtn     = document.getElementById('brief-generate-btn');
+  const briefContent    = document.getElementById('brief-content');
+  const briefEmpty      = document.getElementById('brief-empty');
+  const googleDot       = document.getElementById('brief-google-dot');
+  const googleLabel     = document.getElementById('brief-google-label');
+  const googleSublabel  = document.getElementById('brief-google-sublabel');
+  const connectBtn      = document.getElementById('brief-connect-btn');
 
   let pollInterval = null;
   let lastGeneratedAt = null;
@@ -57,12 +58,40 @@
     return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   }
 
+  async function loadBrief() {
+    try {
+      const res = await fetch('/api/brief/preview?' + Date.now());
+      const md = await res.text();
+      if (md.trim()) {
+        briefContent.innerHTML = marked.parse(md);
+        briefContent.classList.remove('hidden');
+        briefEmpty.classList.add('hidden');
+      } else {
+        briefContent.classList.add('hidden');
+        briefEmpty.classList.remove('hidden');
+      }
+    } catch (e) {
+      console.error('Failed to load brief content', e);
+    }
+  }
+
   function applyStatus(data) {
-    connectBanner.classList.toggle('hidden', data.gmail_connected === true);
+    // Google account row
+    if (data.gmail_connected) {
+      googleDot.className = 'w-2 h-2 rounded-full bg-green-500 shrink-0';
+      googleLabel.textContent = 'Google account connected';
+      googleSublabel.textContent = 'Gmail + Calendar access granted';
+      connectBtn.textContent = 'Reconnect';
+    } else {
+      googleDot.className = 'w-2 h-2 rounded-full bg-gray-600 shrink-0';
+      googleLabel.textContent = 'Google account';
+      googleSublabel.textContent = 'Not connected';
+      connectBtn.textContent = 'Connect';
+    }
 
     const icons = { success: '✅', error: '❌', running: '⏳', never_run: '⏳' };
     const texts = {
-      success: 'Brief generated — draft saved to Gmail.',
+      success: 'Brief generated.',
       error: `Generation failed: ${data.error || 'unknown error'}`,
       running: 'Generating brief… this may take a minute.',
       never_run: 'No brief generated yet.',
@@ -87,13 +116,14 @@
 
       applyStatus(data);
 
-      // If a new brief was generated, reload preview iframe
+      // Load brief content whenever a new one is available
       if (newGeneratedAt && newGeneratedAt !== lastGeneratedAt) {
         lastGeneratedAt = newGeneratedAt;
-        previewFrame.src = '/api/brief/preview?' + Date.now();
+        if (data.status === 'success') {
+          loadBrief();
+        }
       }
 
-      // Stop polling once no longer running
       if (data.status !== 'running' && pollInterval) {
         clearInterval(pollInterval);
         pollInterval = null;
@@ -111,7 +141,6 @@
       const data = await res.json();
       if (data.started) {
         applyStatus({ status: 'running', gmail_connected: true, generated_at: lastGeneratedAt, error: null });
-        // Poll every 3 seconds
         if (pollInterval) clearInterval(pollInterval);
         pollInterval = setInterval(fetchStatus, 3000);
       } else {
@@ -124,8 +153,8 @@
     }
   });
 
-  // ── Gmail connect button ─────────────────────────────────────────────────────
-  document.getElementById('brief-connect-btn').addEventListener('click', async () => {
+  // ── Connect / Reconnect button ───────────────────────────────────────────────
+  connectBtn.addEventListener('click', async () => {
     try {
       const res = await fetch('/api/brief/auth');
       const data = await res.json();
@@ -139,18 +168,10 @@
     }
   });
 
-  // ── Details toggle hint ──────────────────────────────────────────────────────
-  const previewSection = document.getElementById('brief-preview-section');
-  previewSection.addEventListener('toggle', () => {
-    previewToggleHint.textContent = previewSection.open ? '▼ collapse' : '▶ expand';
-  });
-
   // ── On load ──────────────────────────────────────────────────────────────────
-  // Check if returning from OAuth (/?brief_connected=1)
   const params = new URLSearchParams(window.location.search);
   if (params.get('brief_connected') === '1') {
     activateTab('brief');
-    // Strip the query param from the URL without reload
     window.history.replaceState({}, '', window.location.pathname);
   } else {
     activateTab('dashboard');

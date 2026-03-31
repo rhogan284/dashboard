@@ -72,30 +72,35 @@
     const group = document.createElement('div');
     if (showDayLabel) {
       const label = document.createElement('p');
-      label.className = 'text-gray-400 text-xs font-semibold mb-1.5';
+      label.className = 'text-gray-500 text-xs font-medium uppercase tracking-wide mt-3 mb-1.5';
       label.textContent = formatDayLabel(dateStr);
       group.appendChild(label);
     }
-    const ul = document.createElement('ul');
-    ul.className = 'space-y-1.5';
+    const list = document.createElement('div');
+    list.className = 'space-y-1.5';
     for (const event of dayEvents) {
-      const li = document.createElement('li');
-      li.className = 'flex gap-2 text-sm';
-      li.innerHTML = `
-        <span class="text-gray-500 w-16 shrink-0 tabular-nums">${formatTime(event)}</span>
-        <span class="text-white leading-snug">${escapeHtml(event.summary || '')}</span>
+      const card = document.createElement('div');
+      card.className = 'bg-gray-800 rounded-lg px-3 py-2.5 flex gap-3 items-start';
+      card.innerHTML = `
+        <span class="text-blue-400 text-xs tabular-nums shrink-0 pt-0.5 w-14">${formatTime(event)}</span>
+        <span class="text-white text-sm leading-snug">${escapeHtml(event.summary || '')}</span>
       `;
-      ul.appendChild(li);
+      list.appendChild(card);
     }
-    group.appendChild(ul);
+    group.appendChild(list);
     return group;
   }
 
   function renderSection(label, events) {
     const section = document.createElement('div');
-    const header = document.createElement('p');
-    header.className = 'text-gray-400 text-xs uppercase tracking-widest mb-2';
-    header.textContent = label;
+    section.className = 'mb-5';
+
+    const header = document.createElement('div');
+    header.className = 'flex items-center gap-2 mb-2';
+    header.innerHTML = `
+      <span class="w-1 h-4 bg-blue-500 rounded-full shrink-0"></span>
+      <span class="text-white text-sm font-semibold">${label}</span>
+    `;
     section.appendChild(header);
 
     const isToday = label === 'Today';
@@ -106,7 +111,6 @@
       grouped.get(key).push(event);
     }
     const inner = document.createElement('div');
-    inner.className = 'space-y-3 mb-4';
     for (const [dateStr, dayEvents] of grouped) {
       inner.appendChild(renderDayGroup(dateStr, dayEvents, !isToday));
     }

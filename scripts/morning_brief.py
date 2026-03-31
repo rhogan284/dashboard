@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """Morning brief generation script.
 
-Fetches Gmail, Calendar, and market/news data in parallel, composes an HTML
-brief via Ollama (Qwen3.5), creates a Gmail draft, and writes status/preview
-files to flask_app/data/.
+Fetches Gmail, Calendar, and market/news data in parallel, composes a markdown
+brief via Ollama (Qwen3.5), and writes status/preview files to flask_app/data/.
 
 Run from project root:
     python scripts/morning_brief.py
 """
 
-import base64
 import json
 import os
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
-from email.mime.text import MIMEText
 from pathlib import Path
 
 import httpx
@@ -34,213 +31,13 @@ DATA_DIR = PROJECT_ROOT / 'flask_app' / 'data'
 load_dotenv(PROJECT_ROOT / '.env')
 
 # ---------------------------------------------------------------------------
-# HTML Template
+# Constants
 # ---------------------------------------------------------------------------
-
-HTML_TEMPLATE = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Morning Brief — {{FULL_DATE}}</title>
-</head>
-<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2937;">
-
-<!-- HEADER -->
-<div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 60%,#0f3460 100%);padding:36px 32px 28px;text-align:center;">
-  <p style="margin:0 0 6px;font-size:12px;letter-spacing:3px;text-transform:uppercase;color:#94a3b8;font-weight:500;">Your Morning Brief</p>
-  <h1 style="margin:0 0 8px;font-size:34px;font-weight:700;color:#fff;letter-spacing:-0.5px;">Good morning, Ryan ☀️</h1>
-  <p style="margin:0;font-size:15px;color:#93c5fd;">{{FULL_DATE}}</p>
-</div>
-
-<!-- STATS BAR -->
-<div style="background:#0f172a;padding:12px 24px;display:flex;flex-wrap:wrap;gap:0;">
-  <div style="flex:1;min-width:110px;text-align:center;border-right:1px solid #1e293b;padding:4px 12px;">
-    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">S&amp;P 500</div>
-    <div style="font-size:16px;font-weight:700;color:{{SP500_COLOUR}};">{{SP500_LEVEL}} {{SP500_PCT}}</div>
-  </div>
-  <div style="flex:1;min-width:110px;text-align:center;border-right:1px solid #1e293b;padding:4px 12px;">
-    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Nasdaq</div>
-    <div style="font-size:16px;font-weight:700;color:{{NASDAQ_COLOUR}};">{{NASDAQ_LEVEL}} {{NASDAQ_PCT}}</div>
-  </div>
-  <div style="flex:1;min-width:110px;text-align:center;border-right:1px solid #1e293b;padding:4px 12px;">
-    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Dow</div>
-    <div style="font-size:16px;font-weight:700;color:{{DOW_COLOUR}};">{{DOW_LEVEL}} {{DOW_PCT}}</div>
-  </div>
-  <div style="flex:1;min-width:110px;text-align:center;border-right:1px solid #1e293b;padding:4px 12px;">
-    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">VIX</div>
-    <div style="font-size:16px;font-weight:700;color:#f59e0b;">{{VIX}}</div>
-  </div>
-  <div style="flex:1;min-width:110px;text-align:center;border-right:1px solid #1e293b;padding:4px 12px;">
-    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">AUD/USD</div>
-    <div style="font-size:16px;font-weight:700;color:{{AUD_COLOUR}};">{{AUD_RATE}} {{AUD_ARROW}}</div>
-  </div>
-  <div style="flex:1;min-width:110px;text-align:center;padding:4px 12px;">
-    <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">ASX 200</div>
-    <div style="font-size:16px;font-weight:700;color:{{ASX_COLOUR}};">{{ASX_OPEN}}</div>
-  </div>
-</div>
-
-<div style="max-width:860px;margin:0 auto;padding:24px 20px 40px;">
-
-<!-- EMAIL HIGHLIGHTS -->
-<div style="background:#fff;border-radius:12px;padding:28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-  <div style="display:flex;align-items:center;margin-bottom:20px;">
-    <span style="font-size:20px;margin-right:10px;">📧</span>
-    <h2 style="margin:0;font-size:18px;font-weight:700;color:#1f2937;">Email Highlights</h2>
-    <span style="margin-left:auto;background:#2563eb;color:#fff;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;">{{UNREAD_COUNT}} unread</span>
-  </div>
-  <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin-bottom:12px;">
-    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#dc2626;margin-bottom:12px;">⚠️ Action Required</div>
-    {{ACTION_ITEMS}}
-  </div>
-  <div style="background:#f8fafc;border-radius:8px;padding:14px;">
-    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#475569;margin-bottom:8px;">📬 Other Notable</div>
-    <div style="font-size:13px;color:#374151;line-height:1.8;">{{OTHER_EMAILS_LIST}}</div>
-  </div>
-</div>
-
-<!-- CALENDAR -->
-<div style="background:#fff;border-radius:12px;padding:28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-  <div style="display:flex;align-items:center;margin-bottom:20px;">
-    <span style="font-size:20px;margin-right:10px;">📅</span>
-    <h2 style="margin:0;font-size:18px;font-weight:700;color:#1f2937;">Calendar</h2>
-  </div>
-  <div style="background:#f1f5f9;border-radius:8px;padding:16px;margin-bottom:12px;">
-    <div style="font-size:13px;font-weight:700;color:#475569;margin-bottom:8px;">Today — {{SHORT_DATE}}</div>
-    {{TODAY_EVENTS}}
-  </div>
-  <div style="background:#f8fafc;border-radius:8px;padding:14px;">
-    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#475569;margin-bottom:8px;">This Week</div>
-    <div style="font-size:13px;color:#374151;line-height:1.7;">{{WEEK_EVENTS}}</div>
-  </div>
-</div>
-
-<!-- US MARKETS OVERNIGHT -->
-<div style="background:#fff;border-radius:12px;padding:28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-  <div style="display:flex;align-items:center;margin-bottom:20px;">
-    <span style="font-size:20px;margin-right:10px;">🇺🇸</span>
-    <h2 style="margin:0;font-size:18px;font-weight:700;color:#1f2937;">US Markets Overnight</h2>
-    <span style="margin-left:auto;font-size:12px;color:#6b7280;">{{US_CLOSE_DATE}} close</span>
-  </div>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
-    <thead>
-      <tr style="background:#f8fafc;">
-        <th style="text-align:left;padding:8px 12px;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Index</th>
-        <th style="text-align:right;padding:8px 12px;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Close</th>
-        <th style="text-align:right;padding:8px 12px;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Change</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr style="border-bottom:1px solid #f3f4f6;">
-        <td style="padding:10px 12px;font-size:14px;font-weight:600;color:#1f2937;">S&amp;P 500</td>
-        <td style="padding:10px 12px;font-size:14px;text-align:right;color:#374151;">{{SP500_LEVEL}}</td>
-        <td style="padding:10px 12px;font-size:14px;text-align:right;font-weight:700;color:{{SP500_COLOUR}};">{{SP500_PCT}}</td>
-      </tr>
-      <tr style="border-bottom:1px solid #f3f4f6;">
-        <td style="padding:10px 12px;font-size:14px;font-weight:600;color:#1f2937;">Nasdaq</td>
-        <td style="padding:10px 12px;font-size:14px;text-align:right;color:#374151;">{{NASDAQ_LEVEL}}</td>
-        <td style="padding:10px 12px;font-size:14px;text-align:right;font-weight:700;color:{{NASDAQ_COLOUR}};">{{NASDAQ_PCT}}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 12px;font-size:14px;font-weight:600;color:#1f2937;">Dow Jones</td>
-        <td style="padding:10px 12px;font-size:14px;text-align:right;color:#374151;">{{DOW_LEVEL}}</td>
-        <td style="padding:10px 12px;font-size:14px;text-align:right;font-weight:700;color:{{DOW_COLOUR}};">{{DOW_PCT}}</td>
-      </tr>
-    </tbody>
-  </table>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-    <div style="flex:1;min-width:180px;background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:12px 16px;">
-      <div style="font-size:11px;font-weight:700;color:#854d0e;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">VIX — Fear Index</div>
-      <div style="font-size:22px;font-weight:700;color:#78350f;">{{VIX}}</div>
-      <div style="font-size:12px;color:#92400e;margin-top:2px;">{{VIX_INTERPRETATION}}</div>
-    </div>
-    <div style="flex:2;min-width:220px;background:#f8fafc;border-radius:8px;padding:12px 16px;">
-      <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Sector Movers</div>
-      <div style="font-size:13px;color:#374151;line-height:1.7;">{{SECTOR_MOVERS}}</div>
-    </div>
-  </div>
-  <div style="background:#eff6ff;border-left:4px solid #2563eb;border-radius:8px;padding:14px 16px;">
-    <div style="font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Key Themes</div>
-    <div style="font-size:13px;color:#1e3a8a;line-height:1.7;">{{MARKET_THEMES}}</div>
-  </div>
-</div>
-
-<!-- ASX TODAY -->
-<div style="background:#fff;border-radius:12px;padding:28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-  <div style="display:flex;align-items:center;margin-bottom:20px;">
-    <span style="font-size:20px;margin-right:10px;">🇦🇺</span>
-    <h2 style="margin:0;font-size:18px;font-weight:700;color:#1f2937;">ASX Today</h2>
-  </div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-    <div style="flex:1;min-width:160px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;">
-      <div style="font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">AUD/USD</div>
-      <div style="font-size:22px;font-weight:700;color:{{AUD_COLOUR}};">{{AUD_RATE}}</div>
-      <div style="font-size:12px;color:#166534;margin-top:2px;">{{AUD_CONTEXT}}</div>
-    </div>
-    <div style="flex:1;min-width:160px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px 16px;">
-      <div style="font-size:11px;font-weight:700;color:#0c4a6e;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">ASX 200 Open</div>
-      <div style="font-size:22px;font-weight:700;color:{{ASX_COLOUR}};">{{ASX_OPEN}}</div>
-      <div style="font-size:12px;color:#0c4a6e;margin-top:2px;">{{ASX_CONTEXT}}</div>
-    </div>
-  </div>
-  <div style="background:#f8fafc;border-radius:8px;padding:14px;">
-    <div style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">ASX Watch</div>
-    <div style="font-size:13px;color:#374151;line-height:1.7;">{{ASX_WATCH}}</div>
-  </div>
-</div>
-
-<!-- PORTFOLIO — HOLDINGS WATCH -->
-<div style="background:#fff;border-radius:12px;padding:28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-  <div style="display:flex;align-items:center;margin-bottom:20px;">
-    <span style="font-size:20px;margin-right:10px;">💼</span>
-    <h2 style="margin:0;font-size:18px;font-weight:700;color:#1f2937;">Portfolio — Holdings Watch</h2>
-  </div>
-  {{HOLDINGS_CONTENT}}
-</div>
-
-<!-- WEEK AHEAD -->
-<div style="background:#fff;border-radius:12px;padding:28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-  <div style="display:flex;align-items:center;margin-bottom:20px;">
-    <span style="font-size:20px;margin-right:10px;">🗓️</span>
-    <h2 style="margin:0;font-size:18px;font-weight:700;color:#1f2937;">Week Ahead</h2>
-  </div>
-  <div style="margin-bottom:16px;">
-    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#475569;margin-bottom:10px;">🇺🇸 Key US Events</div>
-    <table style="width:100%;border-collapse:collapse;">
-      <thead>
-        <tr style="background:#f8fafc;">
-          <th style="text-align:left;padding:8px 12px;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Date</th>
-          <th style="text-align:left;padding:8px 12px;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Event</th>
-          <th style="text-align:left;padding:8px 12px;font-size:12px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;">Why It Matters</th>
-        </tr>
-      </thead>
-      <tbody>{{WEEK_EVENTS_TABLE}}</tbody>
-    </table>
-  </div>
-  <div style="background:#f8fafc;border-radius:8px;padding:14px;">
-    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#475569;margin-bottom:8px;">📋 Holdings Earnings / Events</div>
-    <div style="font-size:13px;color:#374151;line-height:1.8;">{{HOLDINGS_EARNINGS}}</div>
-  </div>
-</div>
-
-<!-- FOOTER -->
-<div style="background:#1a1a2e;border-radius:12px;padding:18px 28px;text-align:center;">
-  <p style="margin:0 0 4px;font-size:12px;color:#64748b;">Generated at 7:00 AM · Data sourced from web search · Not financial advice</p>
-  <p style="margin:0;font-size:12px;color:#475569;">ryanhogan284@gmail.com</p>
-</div>
-
-</div>
-</body>
-</html>"""
 
 # Maximum number of Gmail messages to fetch; balances LLM prompt size vs coverage
 MAX_MESSAGES = 8
 
-# ---------------------------------------------------------------------------
-# Tavily search queries
-# ---------------------------------------------------------------------------
+ACTIVE_HOLDINGS = 'SHLD, AVGO, CRDO, URA, CIBR, IBIT, AMPX, KRKNF, OSS, ASX:GOLD'
 
 TAVILY_QUERIES = [
     'S&P 500 Nasdaq Dow close today',
@@ -266,7 +63,7 @@ TAVILY_QUERIES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Token management
+# Credentials
 # ---------------------------------------------------------------------------
 
 
@@ -287,7 +84,6 @@ def load_credentials():
     )
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        # Write back updated token
         data['token'] = creds.token
         write_json(token_path, data)
     return creds
@@ -306,12 +102,12 @@ def format_messages(messages: list) -> str:
     for i, msg in enumerate(messages, 1):
         subject = msg.get('subject', '(no subject)')
         sender = msg.get('from', '(unknown sender)')
-        date = msg.get('date', '')
+        date_str = msg.get('date', '')
         snippet = msg.get('snippet', '')
         lines.append(f'{i}. From: {sender}')
         lines.append(f'   Subject: {subject}')
-        if date:
-            lines.append(f'   Date: {date}')
+        if date_str:
+            lines.append(f'   Date: {date_str}')
         if snippet:
             lines.append(f'   Preview: {snippet}')
         lines.append('')
@@ -362,18 +158,14 @@ def format_search_results(search_results: dict) -> str:
         else:
             for item in result.get('results', []):
                 title = item.get('title', '')
-                url = item.get('url', '')
                 content = item.get('content', '')
                 if title:
                     lines.append(f'  • {title}')
                 if content:
-                    # Truncate long content snippets
                     content_short = content[:300].replace('\n', ' ')
                     if len(content) > 300:
                         content_short += '...'
                     lines.append(f'    {content_short}')
-                if url:
-                    lines.append(f'    {url}')
         lines.append('')
     return '\n'.join(lines).rstrip()
 
@@ -383,15 +175,22 @@ def format_search_results(search_results: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def fetch_gmail(creds, yesterday_date: str) -> dict:
-    """Fetch recent Gmail messages (inbox, unread, starred)."""
+_EXCLUDED_LABELS = {'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES'}
+_CATEGORY_EXCLUSION = '-category:social -category:promotions -category:updates'
+
+
+def fetch_gmail(creds) -> dict:
+    """Fetch inbox emails since 9pm last night, excluding social/promotions/updates."""
     from googleapiclient.discovery import build
+
+    # 9pm local time the previous evening as a Unix timestamp (Gmail accepts this)
+    cutoff = datetime.combine(date.today() - timedelta(days=1), datetime.min.time().replace(hour=21))
+    cutoff_ts = int(cutoff.timestamp())
 
     service = build('gmail', 'v1', credentials=creds)
     queries = [
-        f'after:{yesterday_date} in:inbox',
-        'is:unread newer_than:2d',
-        'is:starred newer_than:7d',
+        f'after:{cutoff_ts} in:inbox {_CATEGORY_EXCLUSION}',
+        f'is:starred newer_than:7d {_CATEGORY_EXCLUSION}',
     ]
 
     seen_ids = set()
@@ -417,25 +216,25 @@ def fetch_gmail(creds, yesterday_date: str) -> dict:
                 userId='me', id=mid, format='full'
             ).execute()
 
+            labels = msg.get('labelIds', [])
+
+            # Belt-and-suspenders: skip if any excluded category label is present
+            if _EXCLUDED_LABELS.intersection(labels):
+                continue
+
             headers = {
                 h['name'].lower(): h['value']
                 for h in msg.get('payload', {}).get('headers', [])
             }
-            subject = headers.get('subject', '(no subject)')
-            sender = headers.get('from', '(unknown)')
-            date = headers.get('date', '')
-            snippet = msg.get('snippet', '')
-
-            labels = msg.get('labelIds', [])
             if 'UNREAD' in labels:
                 unread_count += 1
 
             messages.append({
                 'id': mid,
-                'subject': subject,
-                'from': sender,
-                'date': date,
-                'snippet': snippet,
+                'subject': headers.get('subject', '(no subject)'),
+                'from': headers.get('from', '(unknown)'),
+                'date': headers.get('date', ''),
+                'snippet': msg.get('snippet', ''),
                 'labels': labels,
             })
         except Exception as e:
@@ -472,12 +271,12 @@ def search_tavily(client, query: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Qwen composition via Ollama
+# Ollama composition
 # ---------------------------------------------------------------------------
 
 
-def _call_ollama(prompt: str) -> dict:
-    """Make a single non-streaming Ollama call and return parsed JSON dict."""
+def _call_ollama(prompt: str) -> str:
+    """Make a single non-streaming Ollama call and return the response text."""
     ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
     model = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
 
@@ -487,68 +286,62 @@ def _call_ollama(prompt: str) -> dict:
             'model': model,
             'messages': [{'role': 'user', 'content': prompt}],
             'stream': False,
+            'think': False,
+            'options': {'num_ctx': 8192},
         },
         timeout=300.0,
     )
     response.raise_for_status()
     raw = response.json()['message']['content'].strip()
 
-    # Strip markdown code fences if model wraps output
-    if raw.startswith('```'):
-        raw = raw.split('\n', 1)[-1]
-        raw = raw.rsplit('```', 1)[0].strip()
-
     # Strip <think>...</think> reasoning blocks (Qwen3 thinking mode)
     if '<think>' in raw:
         raw = raw.split('</think>', 1)[-1].strip()
 
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f'Ollama returned invalid JSON: {exc}\nRaw output (first 500 chars): {raw[:500]}') from exc
+    return raw
 
 
-def summarise_gmail(gmail_data: dict) -> dict:
-    """Call Ollama to summarise Gmail data. Returns dict with email section values."""
-    prompt = f"""You are processing emails for Ryan Hogan's morning brief.
-Return ONLY a valid JSON object with exactly these three keys:
-- UNREAD_COUNT: string, the number of unread emails
-- ACTION_ITEMS: HTML string — <div> blocks for emails needing a reply or action. Empty string if none.
-- OTHER_EMAILS_LIST: HTML string — one <div> per other notable email, format: <div>📧 <strong>Sender</strong> — one line summary.</div>
+def summarise_gmail(gmail_data: dict) -> str:
+    """Call Ollama to summarise Gmail data. Returns a markdown section string."""
+    prompt = f"""Write the Email Highlights section of Ryan Hogan's morning brief in markdown.
 
-=== GMAIL ({gmail_data.get('unread_count', 0)} unread) ===
-{format_messages(gmail_data.get('messages', []))}
-"""
+        Use this structure:
+        ## 📧 Email Highlights
+        **{gmail_data.get('unread_count', 0)} unread**
+        
+        ### ⚠️ Action Required
+        - (bullet list of emails needing a reply or action, or "Nothing urgent")
+        
+        ### 📬 Other Notable
+        - (bullet list of other notable emails, one line each: Sender — summary)
+        
+        Be concise. Only include genuinely notable emails.
+        
+        === EMAILS ===
+        {format_messages(gmail_data.get('messages', []))}
+        """
     return _call_ollama(prompt)
 
 
-MARKET_JSON_KEYS = (
-    'US_CLOSE_DATE, SP500_LEVEL, SP500_PCT, SP500_COLOUR, '
-    'NASDAQ_LEVEL, NASDAQ_PCT, NASDAQ_COLOUR, '
-    'DOW_LEVEL, DOW_PCT, DOW_COLOUR, '
-    'VIX, VIX_INTERPRETATION, SECTOR_MOVERS, MARKET_THEMES, '
-    'AUD_RATE, AUD_PCT, AUD_ARROW, AUD_COLOUR, AUD_CONTEXT, '
-    'ASX_OPEN, ASX_COLOUR, ASX_CONTEXT, ASX_WATCH, '
-    'HOLDINGS_CONTENT, WEEK_EVENTS_TABLE, HOLDINGS_EARNINGS'
-)
-
-ACTIVE_HOLDINGS = 'SHLD, AVGO, CRDO, URA, CIBR, IBIT, AMPX, KRKNF, OSS, ASX:GOLD'
-
-
-def summarise_markets(search_results: dict, today_str: str) -> dict:
-    """Call Ollama to summarise market/holdings data. Returns dict with market section values."""
-    prompt = f"""You are processing market and news data for Ryan Hogan's morning brief.
+def summarise_markets(search_results: dict, today_str: str) -> str:
+    """Call Ollama to summarise market/holdings data. Returns a markdown section string."""
+    prompt = f"""Write the markets and holdings sections of Ryan Hogan's morning brief in markdown.
 Today is {today_str}. Ryan's active holdings: {ACTIVE_HOLDINGS}.
 
-Return ONLY a valid JSON object with exactly these keys:
-{MARKET_JSON_KEYS}
+Use this structure:
+## 🇺🇸 US Markets Overnight
+(Table or bullet list: S&P 500, Nasdaq, Dow — level and % change. VIX. Key sector movers. 1-2 sentence market theme.)
 
-Rules:
-- Colour fields: use #22c55e (positive/green) or #ef4444 (negative/red)
-- AUD_ARROW: ↑ or ↓
-- HOLDINGS_CONTENT: HTML <div> block per holding with ticker + one-line news + signal badge (🟢 Positive / 🔴 Negative / 🟡 Watch / ⚪ No news)
-- WEEK_EVENTS_TABLE: HTML <tr> rows only, no <table> wrapper
-- HOLDINGS_EARNINGS: plain text, one holding per line
+## 🇦🇺 ASX Today
+(AUD/USD rate with direction. ASX 200 open estimate. 2-3 bullet points on what to watch.)
+
+## 💼 Portfolio — Holdings Watch
+(One bullet per holding: **TICKER** — one-line news summary + signal: 🟢 Positive / 🔴 Negative / 🟡 Watch / ⚪ No news)
+
+## 🗓️ Week Ahead
+(Key US economic events this week as a short list. Any earnings dates for holdings.)
+
+Be concise and scannable. Use data from the search results below.
 
 === MARKET & NEWS DATA ===
 {format_search_results(search_results)}
@@ -556,49 +349,30 @@ Rules:
     return _call_ollama(prompt)
 
 
-def assemble_html(
-    gmail_values: dict,
-    market_values: dict,
-    calendar_data: list,
-    today_str: str,
-) -> str:
-    """Merge all values and substitute into HTML_TEMPLATE. No Ollama call."""
-    short_date = datetime.now().strftime('%d %b')
+def build_calendar_md(calendar_data: list) -> str:
+    """Build the calendar section directly from structured data — no LLM needed."""
+    today_events = format_today_events(calendar_data)
+    week_events = format_week_events(calendar_data)
+    return f"""## 📅 Calendar
 
-    calendar_values = {
-        'FULL_DATE': today_str,
-        'SHORT_DATE': short_date,
-        'TODAY_EVENTS': format_today_events(calendar_data),
-        'WEEK_EVENTS': format_week_events(calendar_data),
-    }
+**Today**
+{today_events}
 
-    values = {**gmail_values, **market_values, **calendar_values}
-
-    html = HTML_TEMPLATE
-    for key, value in values.items():
-        html = html.replace('{{' + key + '}}', str(value))
-    return html
+**This Week**
+{week_events}
+"""
 
 
-# ---------------------------------------------------------------------------
-# Gmail draft creation
-# ---------------------------------------------------------------------------
+def assemble_brief(gmail_md: str, markets_md: str, calendar_md: str, today_str: str) -> str:
+    """Combine all markdown sections into the full brief."""
+    return f"""# Morning Brief — {today_str}
 
+{gmail_md}
 
-def create_draft(creds, html_content: str, today_str: str) -> str:
-    """Create a Gmail draft with the morning brief HTML and return the draft ID."""
-    from googleapiclient.discovery import build
+{calendar_md}
 
-    service = build('gmail', 'v1', credentials=creds)
-    message = MIMEText(html_content, 'html')
-    message['to'] = 'ryanhogan284@gmail.com'
-    message['subject'] = f'📊 Morning Brief — {today_str}'
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    draft = service.users().drafts().create(
-        userId='me',
-        body={'message': {'raw': raw}},
-    ).execute()
-    return draft['id']
+{markets_md}
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -620,7 +394,7 @@ def write_json(path: Path, data: dict):
 
 def write_file(path: Path, content: str):
     """Write a text file atomically using a temp file + os.replace."""
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix='.html')
+    fd, tmp = tempfile.mkstemp(dir=path.parent)
     try:
         with os.fdopen(fd, 'w') as f:
             f.write(content)
@@ -640,15 +414,12 @@ def main():
 
     today = datetime.now()
     today_str = today.strftime('%A, %B %-d, %Y')
-    yesterday_date = (today - timedelta(days=1)).strftime('%Y/%m/%d')
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Write "running" status immediately so the UI can reflect progress
     write_json(DATA_DIR / 'brief_status.json', {
         'status': 'running',
         'generated_at': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        'draft_id': None,
         'error': None,
         'gmail_connected': True,
     })
@@ -658,7 +429,7 @@ def main():
 
     # Fetch all data in parallel
     with ThreadPoolExecutor(max_workers=len(TAVILY_QUERIES) + 2) as executor:
-        gmail_future = executor.submit(fetch_gmail, creds, yesterday_date)
+        gmail_future = executor.submit(fetch_gmail, creds)
         calendar_future = executor.submit(fetch_calendar, creds)
         search_futures = {
             q: executor.submit(search_tavily, tavily_client, q)
@@ -669,32 +440,26 @@ def main():
     calendar_data = calendar_future.result()
     search_results = {q: f.result() for q, f in search_futures.items()}
 
-    # Summarise with Qwen via Ollama (two sequential focused calls)
-    print('Summarising Gmail with Qwen3.5…', flush=True)
-    gmail_values = summarise_gmail(gmail_data)
+    print('Summarising Gmail…', flush=True)
+    gmail_md = summarise_gmail(gmail_data)
 
-    print('Summarising markets with Qwen3.5…', flush=True)
-    market_values = summarise_markets(search_results, today_str)
+    print('Summarising markets…', flush=True)
+    markets_md = summarise_markets(search_results, today_str)
 
-    print('Assembling HTML…', flush=True)
-    html_content = assemble_html(gmail_values, market_values, calendar_data, today_str)
+    print('Assembling brief…', flush=True)
+    calendar_md = build_calendar_md(calendar_data)
+    brief_md = assemble_brief(gmail_md, markets_md, calendar_md, today_str)
 
-    # Create Gmail draft
-    draft_id = create_draft(creds, html_content, today_str)
+    write_file(DATA_DIR / 'morning_brief.md', brief_md)
 
-    # Save preview
-    write_file(DATA_DIR / 'morning_brief_preview.html', html_content)
-
-    # Write success status
     write_json(DATA_DIR / 'brief_status.json', {
         'status': 'success',
         'generated_at': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-        'draft_id': draft_id,
         'error': None,
         'gmail_connected': True,
     })
 
-    print(f'Morning brief generated. Draft ID: {draft_id}')
+    print('Morning brief generated.')
 
 
 if __name__ == '__main__':
@@ -707,7 +472,6 @@ if __name__ == '__main__':
         write_json(DATA_DIR / 'brief_status.json', {
             'status': 'error',
             'generated_at': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-            'draft_id': None,
             'error': str(e),
             'gmail_connected': True,
         })

@@ -12,13 +12,11 @@ brief_bp = Blueprint('brief', __name__)
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly',
     'https://www.googleapis.com/auth/gmail.compose',
-    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/calendar',
 ]
 
 _REDIRECT_URI = 'http://localhost:8001/api/brief/oauth/callback'
 _POST_AUTH_REDIRECT = 'http://localhost:8001/?brief_connected=1'
-
-_PREVIEW_PLACEHOLDER = '<html><body style="font-family:sans-serif;padding:40px;color:#666"><p>No brief generated yet.</p></body></html>'
 
 
 def _data_dir() -> Path:
@@ -125,6 +123,11 @@ def get_auth_url():
             access_type='offline',
             prompt='consent',
         )
+
+        # Persist the code verifier so the callback can complete PKCE exchange
+        verifier_file = _data_dir() / 'brief_code_verifier.txt'
+        if getattr(flow, 'code_verifier', None):
+            verifier_file.write_text(flow.code_verifier)
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 
@@ -144,6 +147,13 @@ def oauth_callback():
             scopes=SCOPES,
             redirect_uri=_REDIRECT_URI,
         )
+
+        # Restore code verifier if PKCE was used during auth URL generation
+        verifier_file = _data_dir() / 'brief_code_verifier.txt'
+        if verifier_file.exists():
+            flow.code_verifier = verifier_file.read_text().strip()
+            verifier_file.unlink(missing_ok=True)
+
         flow.fetch_token(code=code)
         creds = flow.credentials
 
@@ -175,14 +185,14 @@ def oauth_callback():
 
 @brief_bp.route('/api/brief/preview', methods=['GET'])
 def preview_brief():
-    preview_file = _data_dir() / 'morning_brief_preview.html'
+    md_file = _data_dir() / 'morning_brief.md'
 
-    if preview_file.exists():
+    if md_file.exists():
         try:
-            html = preview_file.read_text()
+            content = md_file.read_text()
         except OSError:
-            html = _PREVIEW_PLACEHOLDER
+            content = ''
     else:
-        html = _PREVIEW_PLACEHOLDER
+        content = ''
 
-    return Response(html, content_type='text/html')
+    return Response(content, content_type='text/plain; charset=utf-8')

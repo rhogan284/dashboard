@@ -2,7 +2,7 @@
   function update() {
     const now = new Date();
     document.getElementById('clock-time').textContent = now.toLocaleTimeString('en-US', {
-      hour: '2-digit',
+      hour: 'numeric',
       minute: '2-digit',
       second: '2-digit',
     });

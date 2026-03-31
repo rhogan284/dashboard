@@ -15,7 +15,8 @@
       "Bash(pytest tests/test_llm.py -v)",
       "Bash(pytest tests/test_todos.py -v)",
       "Bash(pytest tests/test_notes.py -v)",
-      "Bash(pytest tests/ -v)"
+      "Bash(pytest tests/ -v)",
+      "Bash(.venv/bin/pip install:*)"
     ]
   }
 }
