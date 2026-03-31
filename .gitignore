@@ -38,3 +38,4 @@ electron/node_modules/
 
 # Git worktrees
 .worktrees/
+/docs/
