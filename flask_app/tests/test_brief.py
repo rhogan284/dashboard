@@ -1,6 +1,10 @@
 import json
-import pytest
+import sys
+import os
+from datetime import date, timedelta
 
+
+# ── /api/brief/status ────────────────────────────────────────────────────────
 
 def test_brief_status_default_when_no_file(client):
     """Returns never_run default when brief_status.json doesn't exist."""
@@ -9,7 +13,6 @@ def test_brief_status_default_when_no_file(client):
     data = response.get_json()
     assert data['status'] == 'never_run'
     assert data['generated_at'] is None
-    assert data['draft_id'] is None
     assert data['error'] is None
     assert data['gmail_connected'] is False
 
@@ -19,7 +22,6 @@ def test_brief_status_reads_existing_file(client, app):
     status = {
         'status': 'success',
         'generated_at': '2026-03-29T07:00:00',
-        'draft_id': 'draft_abc123',
         'error': None,
     }
     status_file = app.config['DATA_DIR'] / 'brief_status.json'
@@ -29,7 +31,7 @@ def test_brief_status_reads_existing_file(client, app):
     assert response.status_code == 200
     data = response.get_json()
     assert data['status'] == 'success'
-    assert data['draft_id'] == 'draft_abc123'
+    assert data['generated_at'] == '2026-03-29T07:00:00'
 
 
 def test_brief_status_gmail_connected_when_token_exists(client, app):
@@ -47,34 +49,39 @@ def test_brief_status_gmail_connected_when_token_exists(client, app):
 
     response = client.get('/api/brief/status')
     assert response.status_code == 200
-    data = response.get_json()
-    assert data['gmail_connected'] is True
+    assert response.get_json()['gmail_connected'] is True
 
 
-def test_brief_preview_returns_placeholder_when_no_file(client):
-    """Returns placeholder HTML when morning_brief_preview.html doesn't exist."""
+# ── /api/brief/preview ───────────────────────────────────────────────────────
+
+def test_brief_preview_returns_empty_when_no_file(client):
+    """Returns empty body when morning_brief.md doesn't exist."""
     response = client.get('/api/brief/preview')
     assert response.status_code == 200
-    assert b'No brief generated yet' in response.data
+    assert response.data == b''
 
 
 def test_brief_preview_serves_existing_file(client, app):
-    """Serves morning_brief_preview.html when it exists."""
-    preview_html = '<html><body>Test brief content</body></html>'
-    preview_file = app.config['DATA_DIR'] / 'morning_brief_preview.html'
-    preview_file.write_text(preview_html)
+    """Serves morning_brief.md when it exists."""
+    md = '# Morning Brief\n\nTest content.'
+    (app.config['DATA_DIR'] / 'morning_brief.md').write_text(md)
 
     response = client.get('/api/brief/preview')
     assert response.status_code == 200
-    assert b'Test brief content' in response.data
+    assert b'# Morning Brief' in response.data
+
+
+# ── morning_brief.py helpers ─────────────────────────────────────────────────
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
+from morning_brief import (
+    format_today_events,
+    format_week_events,
+    assemble_brief,
+)
 
 
 def test_format_today_events_returns_today_only():
-    """format_today_events returns only events starting today."""
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
-    from morning_brief import format_today_events
-    from datetime import date, timedelta
     today = date.today().isoformat()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     events = [
@@ -87,17 +94,10 @@ def test_format_today_events_returns_today_only():
 
 
 def test_format_today_events_empty():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
-    from morning_brief import format_today_events
     assert format_today_events([]) == '(nothing scheduled today)'
 
 
 def test_format_week_events_excludes_today():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
-    from morning_brief import format_week_events
-    from datetime import date, timedelta
     today = date.today().isoformat()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     events = [
@@ -110,105 +110,16 @@ def test_format_week_events_excludes_today():
 
 
 def test_format_week_events_empty():
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
-    from morning_brief import format_week_events
     assert format_week_events([]) == '(no events this week)'
 
 
-def test_summarise_gmail_returns_required_keys():
-    """summarise_gmail returns dict with UNREAD_COUNT, ACTION_ITEMS, OTHER_EMAILS_LIST."""
-    import sys, os
-    from unittest.mock import patch
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
-    from morning_brief import summarise_gmail
-
-    fake_response = {
-        'UNREAD_COUNT': '3',
-        'ACTION_ITEMS': '<div>Reply to John</div>',
-        'OTHER_EMAILS_LIST': '<div>Newsletter</div>',
-    }
-
-    import morning_brief
-    with patch.object(morning_brief, '_call_ollama', return_value=fake_response):
-        result = summarise_gmail({'messages': [], 'unread_count': 3})
-
-    assert result['UNREAD_COUNT'] == '3'
-    assert 'ACTION_ITEMS' in result
-    assert 'OTHER_EMAILS_LIST' in result
-
-
-def test_summarise_markets_returns_required_keys():
-    """summarise_markets returns dict with all market/holdings keys."""
-    import sys, os
-    from unittest.mock import patch
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
-    from morning_brief import summarise_markets
-
-    fake_response = {
-        'US_CLOSE_DATE': 'Friday 28 Mar',
-        'SP500_LEVEL': '5,580', 'SP500_PCT': '-1.1%', 'SP500_COLOUR': '#ef4444',
-        'NASDAQ_LEVEL': '17,322', 'NASDAQ_PCT': '-1.6%', 'NASDAQ_COLOUR': '#ef4444',
-        'DOW_LEVEL': '41,583', 'DOW_PCT': '-0.7%', 'DOW_COLOUR': '#ef4444',
-        'VIX': '21.7', 'VIX_INTERPRETATION': 'Elevated caution',
-        'SECTOR_MOVERS': 'Energy +0.4%', 'MARKET_THEMES': 'Tariff fears',
-        'AUD_RATE': '0.6281', 'AUD_PCT': '-0.4%', 'AUD_ARROW': '↓',
-        'AUD_COLOUR': '#ef4444', 'AUD_CONTEXT': 'Risk-off',
-        'ASX_OPEN': '-0.6%', 'ASX_COLOUR': '#ef4444', 'ASX_CONTEXT': 'SPI lower',
-        'ASX_WATCH': 'BHP ex-div',
-        'HOLDINGS_CONTENT': '<div>AVGO — No news</div>',
-        'WEEK_EVENTS_TABLE': '<tr><td>Mon</td><td>PCE</td><td>Inflation</td></tr>',
-        'HOLDINGS_EARNINGS': 'AVGO: 11 Jun',
-    }
-
-    import morning_brief
-    with patch.object(morning_brief, '_call_ollama', return_value=fake_response):
-        result = summarise_markets({}, 'Monday, March 30, 2026')
-
-    required_keys = [
-        'US_CLOSE_DATE', 'SP500_LEVEL', 'SP500_PCT', 'SP500_COLOUR',
-        'NASDAQ_LEVEL', 'NASDAQ_PCT', 'NASDAQ_COLOUR',
-        'DOW_LEVEL', 'DOW_PCT', 'DOW_COLOUR',
-        'VIX', 'VIX_INTERPRETATION', 'SECTOR_MOVERS', 'MARKET_THEMES',
-        'AUD_RATE', 'AUD_PCT', 'AUD_ARROW', 'AUD_COLOUR', 'AUD_CONTEXT',
-        'ASX_OPEN', 'ASX_COLOUR', 'ASX_CONTEXT', 'ASX_WATCH',
-        'HOLDINGS_CONTENT', 'WEEK_EVENTS_TABLE', 'HOLDINGS_EARNINGS',
-    ]
-    for key in required_keys:
-        assert key in result, f'Missing key: {key}'
-
-
-def test_assemble_html_substitutes_all_placeholders():
-    """assemble_html fills all {{KEY}} placeholders in a minimal template."""
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'))
-    from morning_brief import assemble_html
-
-    gmail_values = {
-        'UNREAD_COUNT': '5',
-        'ACTION_ITEMS': '<div>Reply to boss</div>',
-        'OTHER_EMAILS_LIST': '<div>Newsletter</div>',
-    }
-    market_values = {
-        'US_CLOSE_DATE': 'Friday 28 Mar',
-        'SP500_LEVEL': '5,580', 'SP500_PCT': '-1.1%', 'SP500_COLOUR': '#ef4444',
-        'NASDAQ_LEVEL': '17,322', 'NASDAQ_PCT': '-1.6%', 'NASDAQ_COLOUR': '#ef4444',
-        'DOW_LEVEL': '41,583', 'DOW_PCT': '-0.7%', 'DOW_COLOUR': '#ef4444',
-        'VIX': '21.7', 'VIX_INTERPRETATION': 'Elevated',
-        'SECTOR_MOVERS': 'Tech -2%', 'MARKET_THEMES': 'Tariffs',
-        'AUD_RATE': '0.6281', 'AUD_PCT': '-0.4%', 'AUD_ARROW': '↓',
-        'AUD_COLOUR': '#ef4444', 'AUD_CONTEXT': 'Risk-off',
-        'ASX_OPEN': '-0.6%', 'ASX_COLOUR': '#ef4444', 'ASX_CONTEXT': 'Lower',
-        'ASX_WATCH': 'BHP ex-div',
-        'HOLDINGS_CONTENT': '<div>AVGO ⚪</div>',
-        'WEEK_EVENTS_TABLE': '<tr><td>PCE</td></tr>',
-        'HOLDINGS_EARNINGS': 'AVGO: Jun 11',
-    }
-    calendar_data = []
-
-    html = assemble_html(gmail_values, market_values, calendar_data, 'Monday, March 30, 2026')
-
-    assert '{{' not in html, 'Unfilled placeholders remain in output'
-    assert 'Monday, March 30, 2026' in html
-    assert '5,580' in html
-    assert 'Reply to boss' in html
+def test_assemble_brief_contains_all_sections():
+    gmail_md = '## 📧 Email Highlights\n- Nothing urgent'
+    markets_md = '## 🇺🇸 US Markets\nS&P flat'
+    calendar_md = '## 📅 Calendar\nNo events'
+    result = assemble_brief(gmail_md, markets_md, calendar_md, 'Monday, March 30, 2026')
+    assert 'Morning Brief' in result
+    assert 'Email Highlights' in result
+    assert 'US Markets' in result
+    assert 'Calendar' in result
+    assert 'Monday, March 30, 2026' in result

@@ -16,7 +16,10 @@
       "Bash(pytest tests/test_todos.py -v)",
       "Bash(pytest tests/test_notes.py -v)",
       "Bash(pytest tests/ -v)",
-      "Bash(.venv/bin/pip install:*)"
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(grep -r todos /Users/ryanhogan/Desktop/Coding Work/Dashboard --include=*.py --include=*.js --include=*.html)",
+      "Bash(python3 -m py_compile flask_app/routes/*.py)",
+      "Bash(.venv/bin/python -m pytest tests/ -v)"
     ]
   }
 }
