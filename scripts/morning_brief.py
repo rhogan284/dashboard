@@ -35,7 +35,7 @@ load_dotenv(PROJECT_ROOT / '.env')
 # ---------------------------------------------------------------------------
 
 # Maximum number of Gmail messages to fetch; balances LLM prompt size vs coverage
-MAX_MESSAGES = 8
+MAX_MESSAGES = 16
 
 ACTIVE_HOLDINGS = 'SHLD, AVGO, CRDO, URA, CIBR, IBIT, AMPX, KRKNF, OSS, ASX:GOLD'
 
@@ -175,8 +175,8 @@ def format_search_results(search_results: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-_EXCLUDED_LABELS = {'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES'}
-_CATEGORY_EXCLUSION = '-category:social -category:promotions -category:updates'
+_EXCLUDED_LABELS = {'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS'}
+_CATEGORY_EXCLUSION = '-category:social -category:promotions'
 
 
 def fetch_gmail(creds) -> dict:
@@ -189,28 +189,48 @@ def fetch_gmail(creds) -> dict:
 
     service = build('gmail', 'v1', credentials=creds)
     queries = [
-        f'after:{cutoff_ts} in:inbox {_CATEGORY_EXCLUSION}',
-        f'is:starred newer_than:7d {_CATEGORY_EXCLUSION}',
+        f'after:{cutoff_ts} in:inbox is:unread',
+        'is:starred is:unread newer_than:7d',
     ]
+
+    print(f'  Cutoff timestamp: {cutoff_ts} ({cutoff})', flush=True)
+
+    # Sanity check: bare inbox fetch with no filters
+    try:
+        bare = service.users().messages().list(userId='me', q='in:inbox', maxResults=5).execute()
+        bare_count = len(bare.get('messages', []))
+        profile = service.users().getProfile(userId='me').execute()
+        print(f'  Authenticated as: {profile.get("emailAddress")}', flush=True)
+        print(f'  Bare "in:inbox" → {bare_count} results', flush=True)
+        after_only = service.users().messages().list(userId='me', q=f'after:{cutoff_ts} in:inbox', maxResults=10).execute()
+        print(f'  "after:{cutoff_ts} in:inbox" (no category filter) → {len(after_only.get("messages", []))} results', flush=True)
+        cat_only = service.users().messages().list(userId='me', q=f'in:inbox {_CATEGORY_EXCLUSION}', maxResults=10).execute()
+        print(f'  "in:inbox {_CATEGORY_EXCLUSION}" (no after filter) → {len(cat_only.get("messages", []))} results', flush=True)
+    except Exception as e:
+        print(f'  Bare inbox query failed: {e}', file=sys.stderr)
 
     seen_ids = set()
     message_ids = []
     for query in queries:
         try:
             resp = service.users().messages().list(
-                userId='me', q=query, maxResults=10
+                userId='me', q=query, maxResults=50
             ).execute()
+            count = len(resp.get('messages', []))
+            print(f'  Query "{query}" → {count} results', flush=True)
             for msg in resp.get('messages', []):
                 mid = msg['id']
                 if mid not in seen_ids:
                     seen_ids.add(mid)
                     message_ids.append(mid)
         except Exception as e:
-            print(f'Gmail query "{query}" failed: {e}', file=sys.stderr)
+            print(f'  Gmail query "{query}" failed: {e}', file=sys.stderr)
 
     messages = []
     unread_count = 0
-    for mid in message_ids[:MAX_MESSAGES]:
+    for mid in message_ids:
+        if len(messages) >= MAX_MESSAGES:
+            break
         try:
             msg = service.users().messages().get(
                 userId='me', id=mid, format='full'
@@ -218,8 +238,9 @@ def fetch_gmail(creds) -> dict:
 
             labels = msg.get('labelIds', [])
 
-            # Belt-and-suspenders: skip if any excluded category label is present
+            # Skip if any excluded category label is present
             if _EXCLUDED_LABELS.intersection(labels):
+                print(f'  Skipped {mid} due to labels: {labels}', flush=True)
                 continue
 
             headers = {
@@ -439,6 +460,11 @@ def main():
     gmail_data = gmail_future.result()
     calendar_data = calendar_future.result()
     search_results = {q: f.result() for q, f in search_futures.items()}
+
+    print(f'\n=== Gmail debug: {gmail_data["unread_count"]} unread, {len(gmail_data["messages"])} messages fetched ===', flush=True)
+    for i, msg in enumerate(gmail_data['messages'], 1):
+        print(f'  {i}. [{", ".join(msg.get("labels", []))}] {msg.get("from", "")} — {msg.get("subject", "")}', flush=True)
+    print('', flush=True)
 
     print('Summarising Gmail…', flush=True)
     gmail_md = summarise_gmail(gmail_data)

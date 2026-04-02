@@ -19,7 +19,10 @@
       "Bash(.venv/bin/pip install:*)",
       "Bash(grep -r todos /Users/ryanhogan/Desktop/Coding Work/Dashboard --include=*.py --include=*.js --include=*.html)",
       "Bash(python3 -m py_compile flask_app/routes/*.py)",
-      "Bash(.venv/bin/python -m pytest tests/ -v)"
+      "Bash(.venv/bin/python -m pytest tests/ -v)",
+      "Bash(xxd)",
+      "Bash(xargs -I{} cp \"/Users/ryanhogan/Desktop/{}\" /tmp/gmail_screenshot.png)",
+      "Bash(sqlite3 /Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db .schema)"
     ]
   }
 }

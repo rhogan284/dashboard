@@ -3,10 +3,28 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 let flaskProcess = null;
+let portfolioProcess = null;
 let mainWindow = null;
 
 const FLASK_PORT = 8001;
 const FLASK_URL = `http://localhost:${FLASK_PORT}`;
+
+const PORTFOLIO_PORT = 8000;
+const PORTFOLIO_APP_DIR = path.join('/Users', 'ryanhogan', 'Desktop', 'Coding Work', 'portfolio_app');
+const PORTFOLIO_PYTHON = path.join(PORTFOLIO_APP_DIR, '.venv', 'bin', 'python');
+const PORTFOLIO_SCRIPT = path.join(PORTFOLIO_APP_DIR, 'app.py');
+
+function startPortfolio() {
+  portfolioProcess = spawn(PORTFOLIO_PYTHON, [PORTFOLIO_SCRIPT], {
+    cwd: PORTFOLIO_APP_DIR,
+    env: { ...process.env },
+  });
+  portfolioProcess.stdout.on('data', (data) => process.stdout.write(`[Portfolio] ${data}`));
+  portfolioProcess.stderr.on('data', (data) => process.stderr.write(`[Portfolio] ${data}`));
+  portfolioProcess.on('error', (err) => {
+    console.error('Failed to start portfolio app:', err.message);
+  });
+}
 
 function startFlask() {
   const pythonPath = path.join(__dirname, '..', 'flask_app', '.venv', 'bin', 'python');
@@ -49,6 +67,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false,
+      webviewTag: true,
     },
   });
 
@@ -65,6 +85,7 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   startFlask();
+  startPortfolio();
   try {
     await waitForFlask(FLASK_URL);
     createWindow();
@@ -76,5 +97,6 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (flaskProcess) flaskProcess.kill();
+  if (portfolioProcess) portfolioProcess.kill();
   app.quit();
 });

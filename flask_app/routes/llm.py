@@ -297,6 +297,7 @@ def chat() -> Response:
     messages = data.get('messages')
     if not messages or not isinstance(messages, list):
         return Response('{"error": "messages required"}', status=400, mimetype='application/json')
+    think = bool(data.get('think', False))
 
     today = datetime.now().strftime('%A, %B %-d, %Y')
     # Include local UTC offset so the model can use it for calendar datetimes
@@ -325,10 +326,13 @@ def chat() -> Response:
                         'messages': loop_messages,
                         'tools': TOOLS,
                         'stream': False,
-                        'think': False,
-                        'options': {'num_ctx': 8192},
+                        'think': think,
+                        'options': {
+                            'num_ctx': 8192,
+                            'num_predict': 4096 if think else -1,
+                        },
                     },
-                    timeout=120.0,
+                    timeout=300.0 if think else 120.0,
                 )
                 resp.raise_for_status()
 

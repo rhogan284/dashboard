@@ -25,8 +25,11 @@
   }
 
   function formatDayLabel(dateStr) {
-    const today = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const localDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const today = localDate(now);
+    const tomorrow = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
     if (dateStr === today) return 'Today';
     if (dateStr === tomorrow) return 'Tomorrow';
     return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {

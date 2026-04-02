@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script>
     tailwind.config = { darkMode: 'class' }
   </script>
@@ -19,8 +19,36 @@
   <!-- Header -->
   <header class="flex items-center justify-between px-6 py-3 bg-gray-900 border-b border-gray-800 shrink-0">
     <span class="font-semibold text-lg tracking-tight">Dashboard</span>
-    <nav class="flex gap-1">
+    <nav class="flex gap-1 items-center">
       <a href="/" class="text-sm px-3 py-1.5 rounded-md bg-gray-700 text-white">Home</a>
+      <div class="relative" id="settings-container">
+        <button id="settings-btn" class="text-sm px-3 py-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors" title="Settings">⚙</button>
+        <div id="settings-dropdown" class="hidden absolute right-0 top-full mt-1 w-72 bg-gray-900 border border-gray-700 rounded-xl shadow-xl z-50 p-3 flex flex-col gap-1">
+          <!-- Google Tasks row -->
+          <div class="flex items-center justify-between gap-3 px-2 py-2">
+            <div class="flex items-center gap-3">
+              <div id="settings-tasks-dot" class="w-2 h-2 rounded-full bg-gray-600 shrink-0"></div>
+              <div>
+                <div class="text-sm text-gray-300">Google Tasks</div>
+                <div id="settings-tasks-sublabel" class="text-xs text-gray-500 mt-0.5">Not connected</div>
+              </div>
+            </div>
+            <button id="settings-tasks-btn" class="ml-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-lg transition-colors shrink-0">Connect</button>
+          </div>
+          <div class="border-t border-gray-800"></div>
+          <!-- Google Account row -->
+          <div class="flex items-center justify-between gap-3 px-2 py-2">
+            <div class="flex items-center gap-3">
+              <div id="settings-google-dot" class="w-2 h-2 rounded-full bg-gray-600 shrink-0"></div>
+              <div>
+                <div class="text-sm text-gray-300">Google Account</div>
+                <div id="settings-google-sublabel" class="text-xs text-gray-500 mt-0.5">Not connected</div>
+              </div>
+            </div>
+            <button id="settings-google-btn" class="ml-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-lg transition-colors shrink-0">Connect</button>
+          </div>
+        </div>
+      </div>
     </nav>
   </header>
 
@@ -28,6 +56,7 @@
   <nav id="tab-bar" class="bg-gray-900 border-b border-gray-800 px-4 flex gap-1 pt-2 shrink-0">
     <button data-tab="dashboard" class="tab-btn px-4 py-2 text-sm rounded-t-md text-white bg-gray-700 border-b-2 border-blue-500">Dashboard</button>
     <button data-tab="brief" class="tab-btn px-4 py-2 text-sm rounded-t-md text-gray-400 hover:text-white transition-colors">Morning Brief</button>
+    <button data-tab="portfolio" class="tab-btn px-4 py-2 text-sm rounded-t-md text-gray-400 hover:text-white transition-colors">Portfolio</button>
   </nav>
 
   <!-- 3-column layout -->
@@ -77,20 +106,27 @@
 
       <!-- Input bar — pinned to bottom -->
       <div class="shrink-0 py-4 border-t border-gray-800">
-        <div class="flex gap-2 items-end">
-          <textarea
-            id="llm-input"
-            placeholder="Hey Ryan, ask away..."
-            rows="3"
-            class="flex-1 bg-gray-800 text-white rounded-lg px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
-          ></textarea>
-          <div class="flex flex-col gap-2">
+        <div class="flex gap-2 items-stretch">
+          <div class="relative flex-1 flex flex-col">
+            <textarea
+              id="llm-input"
+              placeholder="Hey Ryan, ask away..."
+              rows="3"
+              class="flex-1 w-full bg-gray-800 text-white rounded-lg px-4 pt-3 pb-8 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
+            ></textarea>
+            <button id="llm-think-toggle"
+              class="absolute bottom-2 right-2 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors"
+              title="Toggle thinking mode">
+              Think
+            </button>
+          </div>
+          <div class="flex flex-col gap-2 w-20">
             <button id="llm-new-chat"
-              class="w-20 py-2.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-gray-300 text-sm rounded-lg transition-colors hidden">
+              class="flex-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-gray-300 text-sm rounded-lg transition-colors hidden">
               New Chat
             </button>
             <button id="llm-submit"
-              class="w-20 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
+              class="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
               Send
             </button>
           </div>
@@ -106,10 +142,6 @@
       <div>
         <div class="flex items-center justify-between mb-3">
           <h2 class="text-white text-sm font-semibold">To-Do</h2>
-          <button id="todo-connect-btn"
-            class="text-xs text-gray-500 hover:text-white transition-colors hidden">
-            Connect Google Tasks
-          </button>
         </div>
         <div id="todo-input-row" class="flex flex-col gap-2 mb-4 hidden">
           <input id="todo-input" placeholder="Add a task…"
@@ -124,7 +156,7 @@
           </div>
         </div>
         <p id="todo-connect-prompt" class="text-gray-500 text-sm">
-          Connect Google Tasks to sync your to-dos.
+          Use ⚙ Settings to connect Google Tasks.
         </p>
         <ul id="todo-list" class="space-y-2"></ul>
       </div>
@@ -162,21 +194,6 @@
         </div>
       </div>
 
-      <!-- Google account row — always visible -->
-      <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <div id="brief-google-dot" class="w-2 h-2 rounded-full bg-gray-600 shrink-0"></div>
-          <div>
-            <div id="brief-google-label" class="text-sm text-gray-300">Google account</div>
-            <div id="brief-google-sublabel" class="text-xs text-gray-500 mt-0.5">Not connected</div>
-          </div>
-        </div>
-        <button id="brief-connect-btn"
-          class="ml-4 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-lg transition-colors shrink-0">
-          Connect
-        </button>
-      </div>
-
       <!-- Brief content -->
       <div id="brief-content" class="hidden prose prose-invert max-w-none
         [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:text-white [&_h1]:mb-4 [&_h1]:pb-3 [&_h1]:border-b [&_h1]:border-gray-700
@@ -197,6 +214,12 @@
     </div>
   </div>
 
+  <!-- Portfolio tab -->
+  <div id="tab-portfolio" class="hidden flex-1 overflow-hidden flex flex-col">
+    <div id="portfolio-loading" class="flex-1 flex items-center justify-center text-gray-500 text-sm">Loading portfolio…</div>
+    <webview id="portfolio-webview" style="flex:1; width:100%; min-height:0; display:none;"></webview>
+  </div>
+
   <!-- Inject server-side config for JS -->
   <script>const GOOGLE_CLIENT_ID = "{{ google_client_id }}";</script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -206,5 +229,6 @@
   <script src="/static/js/notes.js"></script>
   <script src="/static/js/calendar.js"></script>
   <script src="/static/js/morning_brief.js"></script>
+  <script src="/static/js/settings.js"></script>
 </body>
 </html>

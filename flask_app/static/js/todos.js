@@ -4,7 +4,6 @@
   const addBtn       = document.getElementById('todo-add');
   const inputRow     = document.getElementById('todo-input-row');
   const list         = document.getElementById('todo-list');
-  const connectBtn   = document.getElementById('todo-connect-btn');
   const connectPrompt = document.getElementById('todo-connect-prompt');
 
   function escapeHtml(text) {
@@ -81,15 +80,11 @@
   function showConnected() {
     inputRow.classList.remove('hidden');
     connectPrompt.classList.add('hidden');
-    connectBtn.textContent = 'Reconnect';
-    connectBtn.classList.remove('hidden');
   }
 
   function showDisconnected() {
     inputRow.classList.add('hidden');
     connectPrompt.classList.remove('hidden');
-    connectBtn.textContent = 'Connect Google Tasks';
-    connectBtn.classList.remove('hidden');
     list.innerHTML = '';
   }
 
@@ -151,7 +146,7 @@
 
   // ── Google Tasks OAuth (GIS) ──────────────────────────────────────
 
-  function connectGoogleTasks() {
+  function connectGoogleTasks(onConnected) {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
       scope: 'https://www.googleapis.com/auth/tasks',
@@ -165,15 +160,16 @@
           }),
         });
         loadTodos();
+        if (onConnected) onConnected();
       },
     });
     client.requestAccessToken();
   }
+  window.connectGoogleTasks = connectGoogleTasks;
 
   // ── Event listeners ───────────────────────────────────────────────
 
   addBtn.addEventListener('click', addTodo);
-  connectBtn.addEventListener('click', connectGoogleTasks);
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') addTodo();
   });

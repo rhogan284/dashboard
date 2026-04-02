@@ -1,16 +1,25 @@
 (function () {
-  const input       = document.getElementById('llm-input');
-  const submitBtn   = document.getElementById('llm-submit');
-  const newChatBtn  = document.getElementById('llm-new-chat');
-  const historyDiv  = document.getElementById('llm-history');
-  const scrollArea  = document.getElementById('llm-scroll-area');
-  const thinkingDiv = document.getElementById('llm-thinking');
-  const timerSpan   = document.getElementById('llm-timer');
-  const errorP      = document.getElementById('llm-error');
+  const input           = document.getElementById('llm-input');
+  const submitBtn       = document.getElementById('llm-submit');
+  const newChatBtn      = document.getElementById('llm-new-chat');
+  const thinkToggleBtn  = document.getElementById('llm-think-toggle');
+  const historyDiv      = document.getElementById('llm-history');
+  const scrollArea      = document.getElementById('llm-scroll-area');
+  const thinkingDiv     = document.getElementById('llm-thinking');
+  const timerSpan       = document.getElementById('llm-timer');
+  const errorP          = document.getElementById('llm-error');
 
   let messages = [];
   let timerInterval = null;
   let toolStatus = null;
+  let thinkingEnabled = false;
+
+  thinkToggleBtn.addEventListener('click', () => {
+    thinkingEnabled = !thinkingEnabled;
+    thinkToggleBtn.className = thinkingEnabled
+      ? 'absolute bottom-2 right-2 px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded-md transition-colors'
+      : 'absolute bottom-2 right-2 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors';
+  });
 
   // ── Rendering ─────────────────────────────────────────────────────
 
@@ -22,10 +31,13 @@
     historyDiv.innerHTML = '';
     for (const msg of messages) {
       const bubble = document.createElement('div');
-      bubble.className = msg.role === 'user'
-        ? 'self-end bg-blue-700 text-white text-sm rounded-lg px-4 py-2 max-w-[85%] whitespace-pre-wrap'
-        : 'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] whitespace-pre-wrap';
-      bubble.textContent = msg.content;
+      if (msg.role === 'user') {
+        bubble.className = 'self-end bg-blue-700 text-white text-sm rounded-lg px-4 py-2 max-w-[85%] whitespace-pre-wrap';
+        bubble.textContent = msg.content;
+      } else {
+        bubble.className = 'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] prose prose-sm prose-invert max-w-none';
+        bubble.innerHTML = marked.parse(msg.content);
+      }
       historyDiv.appendChild(bubble);
     }
 
@@ -74,15 +86,15 @@
     // Append a live bubble for in-progress streaming (outside messages[])
     const streamBubble = document.createElement('div');
     streamBubble.className =
-      'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] whitespace-pre-wrap';
-    streamBubble.textContent = '';
+      'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] prose prose-sm prose-invert max-w-none';
+    streamBubble.innerHTML = '';
     historyDiv.appendChild(streamBubble);
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages, think: thinkingEnabled }),
       });
 
       if (!response.ok) throw new Error(`Backend error: ${response.status}`);
@@ -102,7 +114,7 @@
             const token = data.message?.content;
             if (token) {
               assistantContent += token;
-              streamBubble.textContent = assistantContent;
+              streamBubble.innerHTML = marked.parse(assistantContent);
               scrollToBottom();
             }
           } catch (parseErr) {

@@ -5,8 +5,24 @@
   const tabs = {
     dashboard: document.getElementById('tab-dashboard'),
     brief: document.getElementById('tab-brief'),
+    portfolio: document.getElementById('tab-portfolio'),
   };
   const tabBtns = document.querySelectorAll('.tab-btn');
+
+  // ── Portfolio webview lazy load ──────────────────────────────────────────────
+  const portfolioWebview  = document.getElementById('portfolio-webview');
+  const portfolioLoading  = document.getElementById('portfolio-loading');
+  let portfolioLoaded = false;
+
+  function loadPortfolio() {
+    if (portfolioLoaded) return;
+    portfolioWebview.src = 'http://localhost:8000/portfolio';
+    portfolioWebview.addEventListener('did-finish-load', () => {
+      portfolioLoading.style.display = 'none';
+      portfolioWebview.style.display = 'flex';
+      portfolioLoaded = true;
+    }, { once: true });
+  }
 
   function activateTab(name) {
     Object.entries(tabs).forEach(([key, el]) => {
@@ -31,6 +47,9 @@
         pollInterval = null;
       }
     }
+    if (name === 'portfolio') {
+      loadPortfolio();
+    }
   }
 
   tabBtns.forEach(btn => {
@@ -44,10 +63,6 @@
   const generateBtn     = document.getElementById('brief-generate-btn');
   const briefContent    = document.getElementById('brief-content');
   const briefEmpty      = document.getElementById('brief-empty');
-  const googleDot       = document.getElementById('brief-google-dot');
-  const googleLabel     = document.getElementById('brief-google-label');
-  const googleSublabel  = document.getElementById('brief-google-sublabel');
-  const connectBtn      = document.getElementById('brief-connect-btn');
 
   let pollInterval = null;
   let lastGeneratedAt = null;
@@ -76,19 +91,6 @@
   }
 
   function applyStatus(data) {
-    // Google account row
-    if (data.gmail_connected) {
-      googleDot.className = 'w-2 h-2 rounded-full bg-green-500 shrink-0';
-      googleLabel.textContent = 'Google account connected';
-      googleSublabel.textContent = 'Gmail + Calendar access granted';
-      connectBtn.textContent = 'Reconnect';
-    } else {
-      googleDot.className = 'w-2 h-2 rounded-full bg-gray-600 shrink-0';
-      googleLabel.textContent = 'Google account';
-      googleSublabel.textContent = 'Not connected';
-      connectBtn.textContent = 'Connect';
-    }
-
     const icons = { success: '✅', error: '❌', running: '⏳', never_run: '⏳' };
     const texts = {
       success: 'Brief generated.',
@@ -150,21 +152,6 @@
     } catch (e) {
       statusText.textContent = 'Network error starting generation.';
       generateBtn.disabled = false;
-    }
-  });
-
-  // ── Connect / Reconnect button ───────────────────────────────────────────────
-  connectBtn.addEventListener('click', async () => {
-    try {
-      const res = await fetch('/api/brief/auth');
-      const data = await res.json();
-      if (data.auth_url) {
-        window.open(data.auth_url, '_blank');
-      } else {
-        alert('Could not get auth URL: ' + (data.error || 'unknown error'));
-      }
-    } catch (e) {
-      alert('Network error fetching auth URL.');
     }
   });
 
