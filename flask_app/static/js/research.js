@@ -383,7 +383,6 @@
             if (data.error) throw new Error(data.error);
             if (data.session_id) {
               activeSessionId = data.session_id;
-              loadSessions();
             }
             if (data.status) { toolStatus = data.status; }
             const token = data.message?.content;
@@ -398,12 +397,13 @@
         }
       }
 
+      loadSessions();
       messages.push({ role: 'assistant', content: assistantContent });
       renderHistory();
       refreshTitle();
 
     } catch (err) {
-      messages = [];
+      messages.pop();
       streamBubble.remove();
       renderHistory();
       errorP.textContent = err.message || 'Failed to start portfolio review';
