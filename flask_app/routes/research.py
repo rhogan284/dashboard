@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+# Response, stream_with_context, jsonify, request are used by route handlers added in later tasks
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 research_bp = Blueprint('research', __name__)
@@ -61,8 +62,9 @@ def _init_db():
                 created_at  TEXT NOT NULL,
                 updated_at  TEXT NOT NULL
             );
+            CREATE INDEX IF NOT EXISTS idx_research_messages_session
+                ON research_messages(session_id);
         """)
-        conn.commit()
     finally:
         conn.close()
 
