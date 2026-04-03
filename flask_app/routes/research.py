@@ -650,6 +650,134 @@ def chat() -> Response:
 
 
 # ---------------------------------------------------------------------------
+# Portfolio review route
+# ---------------------------------------------------------------------------
+
+PORTFOLIO_APP_URL = os.getenv('PORTFOLIO_APP_URL', 'http://localhost:8000')
+
+
+@research_bp.route('/api/research/review', methods=['POST'])
+def portfolio_review() -> Response:
+    # 1. Fetch review markdown from portfolio app
+    try:
+        r = httpx.get(f'{PORTFOLIO_APP_URL}/api/review/markdown', timeout=15.0)
+        r.raise_for_status()
+        review_markdown = r.json()['markdown']
+    except Exception as exc:
+        return Response(
+            json.dumps({'error': f'Portfolio app not reachable — is it running on port 8000? ({exc})'}),
+            status=503,
+            mimetype='application/json',
+        )
+
+    # 2. Prepend free market context (yfinance)
+    try:
+        market_context = _build_market_context()
+    except Exception:
+        market_context = ''
+
+    full_prompt = (market_context + '\n' + review_markdown).strip() if market_context else review_markdown
+
+    # 3. Create a new session titled "Portfolio Review"
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO research_sessions (title, created_at, updated_at) VALUES (?, ?, ?)",
+            ('Portfolio Review', now, now),
+        )
+        conn.commit()
+        session_id = cur.lastrowid
+
+    # 4. Persist the full prompt as the user message
+    _save_message(session_id, 'user', full_prompt)
+
+    # 5. Build system prompt
+    today = datetime.now().strftime('%A, %B %-d, %Y')
+    utc_offset = datetime.now().astimezone().strftime('%z')
+    offset_str = f"{utc_offset[:3]}:{utc_offset[3:]}"
+
+    with _get_db() as conn:
+        pinboard_rows = conn.execute(
+            "SELECT title, content, tags FROM research_pinboard ORDER BY created_at DESC"
+        ).fetchall()
+
+    pinboard_text = '\n\n'.join(
+        f"**{r['title']}** [{r['tags']}]\n{r['content']}" for r in pinboard_rows
+    ) if pinboard_rows else '(no notes yet)'
+
+    system_msg = {
+        'role': 'system',
+        'content': (
+            f"You are an investment research assistant for Ryan Hogan.\n"
+            f"Today is {today}. Your local UTC offset is {offset_str}.\n"
+            "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
+            "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
+            f"=== Investment Notes & Theses ===\n{pinboard_text}"
+        ),
+    }
+
+    def generate():
+        loop_messages = [system_msg, {'role': 'user', 'content': full_prompt}]
+        try:
+            while True:
+                resp = httpx.post(
+                    f'{OLLAMA_URL}/api/chat',
+                    json={
+                        'model': DEFAULT_MODEL,
+                        'messages': loop_messages,
+                        'tools': RESEARCH_TOOLS,
+                        'stream': False,
+                        'options': {'num_ctx': 16384, 'num_predict': -1},
+                    },
+                    timeout=120.0,
+                )
+                resp.raise_for_status()
+
+                msg = resp.json()['message']
+                tool_calls = msg.get('tool_calls') or []
+
+                if not tool_calls:
+                    content = msg.get('content', '')
+                    if '<think>' in content:
+                        content = content.split('</think>', 1)[-1].strip()
+                    _save_message(session_id, 'assistant', content)
+                    _touch_session(session_id)
+                    yield (json.dumps({'message': {'content': content}}) + '\n').encode()
+                    break
+
+                loop_messages.append(msg)
+
+                for tc in tool_calls:
+                    fn = tc.get('function', {})
+                    name = fn.get('name', '')
+                    args = fn.get('arguments', {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
+                    yield (json.dumps({'status': label}) + '\n').encode()
+                    handler = _RESEARCH_TOOL_HANDLERS.get(name)
+                    result = handler(args) if handler else f'Unknown tool: {name}'
+                    _save_message(session_id, 'tool', result)
+                    loop_messages.append({'role': 'tool', 'content': result})
+
+        except httpx.ConnectError:
+            yield b'{"error": "Cannot connect to Ollama. Is it running?"}\n'
+        except httpx.HTTPStatusError as exc:
+            yield (json.dumps({'error': f'Ollama error: {exc.response.status_code}'}) + '\n').encode()
+        except Exception as exc:
+            yield (json.dumps({'error': str(exc)}) + '\n').encode()
+
+    def generate_with_session_id():
+        yield (json.dumps({'session_id': session_id}) + '\n').encode()
+        yield from generate()
+
+    return Response(stream_with_context(generate_with_session_id()), mimetype='application/x-ndjson')
+
+
+# ---------------------------------------------------------------------------
 # Background: summarise + title
 # ---------------------------------------------------------------------------
 

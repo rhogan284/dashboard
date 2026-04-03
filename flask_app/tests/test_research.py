@@ -250,6 +250,83 @@ def test_chat_persists_messages_to_db(client):
     assert 'assistant' in roles
 
 
+# ── Portfolio review endpoint ─────────────────────────────────────────────────
+
+import httpx as _httpx
+
+
+def test_review_returns_503_when_portfolio_app_unreachable(client):
+    with patch('routes.research.httpx.get', side_effect=_httpx.ConnectError('refused')):
+        response = client.post('/api/research/review')
+    assert response.status_code == 503
+    data = response.get_json()
+    assert 'not reachable' in data['error'].lower()
+
+
+def test_review_creates_session_and_streams_response(client):
+    mock_get = MagicMock()
+    mock_get.raise_for_status = MagicMock()
+    mock_get.json.return_value = {'markdown': '# Portfolio Review\nTest content'}
+
+    import json as _json
+    with patch('routes.research.httpx.get', return_value=mock_get), \
+         patch('routes.research.httpx.post', return_value=_mock_ollama_response('Here are my recommendations.')), \
+         patch('routes.research._build_market_context', return_value='## Market Context\n- VIX: 18\n'):
+        response = client.post('/api/research/review')
+        body = response.data
+
+    assert response.status_code == 200
+    assert response.content_type == 'application/x-ndjson'
+    lines = [l for l in body.decode().strip().split('\n') if l]
+    first = _json.loads(lines[0])
+    assert 'session_id' in first
+    last = _json.loads(lines[-1])
+    assert 'message' in last
+    assert 'recommendations' in last['message']['content'].lower()
+
+
+def test_review_persists_user_and_assistant_messages(client):
+    mock_get = MagicMock()
+    mock_get.raise_for_status = MagicMock()
+    mock_get.json.return_value = {'markdown': '# Review\nContent'}
+
+    import json as _json
+    with patch('routes.research.httpx.get', return_value=mock_get), \
+         patch('routes.research.httpx.post', return_value=_mock_ollama_response('Analysis complete.')), \
+         patch('routes.research._build_market_context', return_value=''):
+        response = client.post('/api/research/review')
+        body = response.data
+
+    lines = [l for l in body.decode().strip().split('\n') if l]
+    session_id = _json.loads(lines[0])['session_id']
+
+    session = client.get(f'/api/research/sessions/{session_id}').get_json()
+    roles = [m['role'] for m in session['messages']]
+    assert 'user' in roles
+    assert 'assistant' in roles
+
+
+def test_review_session_title_is_portfolio_review(client):
+    mock_get = MagicMock()
+    mock_get.raise_for_status = MagicMock()
+    mock_get.json.return_value = {'markdown': '# Review'}
+
+    import json as _json
+    with patch('routes.research.httpx.get', return_value=mock_get), \
+         patch('routes.research.httpx.post', return_value=_mock_ollama_response('Done.')), \
+         patch('routes.research._build_market_context', return_value=''):
+        response = client.post('/api/research/review')
+        body = response.data
+
+    lines = [l for l in body.decode().strip().split('\n') if l]
+    session_id = _json.loads(lines[0])['session_id']
+
+    sessions = client.get('/api/research/sessions').get_json()
+    match = next((s for s in sessions if s['id'] == session_id), None)
+    assert match is not None
+    assert match['title'] == 'Portfolio Review'
+
+
 # ── Summarise + title endpoints ───────────────────────────────────────────────
 
 def test_summarise_empty_session_returns_ok(client):
@@ -294,3 +371,5 @@ def test_get_title_calls_ollama_and_saves(client):
         response = client.get(f'/api/research/sessions/{session_id}/title')
     assert response.status_code == 200
     assert response.get_json()['title'] == 'AAPL Q1 Earnings Deep Dive'
+
+
