@@ -57,6 +57,7 @@
     <button data-tab="dashboard" class="tab-btn px-4 py-2 text-sm rounded-t-md text-white bg-gray-700 border-b-2 border-blue-500">Dashboard</button>
     <button data-tab="brief" class="tab-btn px-4 py-2 text-sm rounded-t-md text-gray-400 hover:text-white transition-colors">Morning Brief</button>
     <button data-tab="portfolio" class="tab-btn px-4 py-2 text-sm rounded-t-md text-gray-400 hover:text-white transition-colors">Portfolio</button>
+    <button data-tab="research" class="tab-btn px-4 py-2 text-sm rounded-t-md text-gray-400 hover:text-white transition-colors">Research</button>
   </nav>
 
   <!-- 3-column layout -->
@@ -220,6 +221,104 @@
     <webview id="portfolio-webview" style="flex:1; width:100%; min-height:0; display:none;"></webview>
   </div>
 
+  <!-- Research tab -->
+  <div id="tab-research" class="hidden flex-1 overflow-hidden flex">
+
+    <!-- Left sidebar -->
+    <aside class="w-64 shrink-0 border-r border-gray-800 flex flex-col overflow-hidden">
+
+      <!-- New Chat button -->
+      <div class="px-3 pt-4 pb-2 shrink-0">
+        <button id="research-new-chat"
+          class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+          + New Chat
+        </button>
+      </div>
+
+      <!-- Session list -->
+      <div class="flex-1 overflow-y-auto px-2 pb-2">
+        <p class="text-gray-500 text-xs uppercase tracking-widest px-2 py-2">Sessions</p>
+        <ul id="research-session-list" class="space-y-1"></ul>
+      </div>
+
+      <!-- Divider -->
+      <div class="border-t border-gray-800 mx-3"></div>
+
+      <!-- Pinboard section -->
+      <div class="shrink-0 flex flex-col overflow-hidden" style="max-height: 45%">
+        <div class="flex items-center justify-between px-3 pt-3 pb-1">
+          <p class="text-gray-500 text-xs uppercase tracking-widest">Pinboard</p>
+          <button id="research-add-pin"
+            class="text-gray-400 hover:text-white text-lg leading-none transition-colors" title="Add note">+</button>
+        </div>
+        <div class="overflow-y-auto px-2 pb-3">
+          <ul id="research-pinboard-list" class="space-y-1"></ul>
+          <p id="research-pinboard-warn" class="hidden text-yellow-500 text-xs px-2 mt-1">
+            Pinboard exceeds 2000 chars — older notes may be truncated in context.
+          </p>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- Main chat area -->
+    <div class="flex-1 flex flex-col overflow-hidden">
+
+      <!-- Scrollable message history -->
+      <div class="flex-1 min-h-0 overflow-y-auto px-6" id="research-scroll-area">
+        <div class="flex flex-col justify-end min-h-full gap-3 pb-3">
+          <div id="research-history" class="flex flex-col gap-3"></div>
+          <div id="research-thinking" class="flex items-center gap-2 hidden">
+            <span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+            <span id="research-timer" class="text-gray-400 text-xs">Thinking… 0s</span>
+          </div>
+          <p id="research-error" class="text-red-400 text-sm hidden"></p>
+        </div>
+      </div>
+
+      <!-- Input bar -->
+      <div class="shrink-0 py-4 px-6 border-t border-gray-800">
+
+        <!-- File path row (hidden by default) -->
+        <div id="research-file-path-row" class="hidden mb-2">
+          <input id="research-file-path"
+            placeholder="Absolute file path (e.g. /Users/ryanhogan/Downloads/report.pdf)"
+            class="w-full bg-gray-800 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500" />
+        </div>
+
+        <div class="flex gap-2 items-stretch">
+          <div class="relative flex-1 flex flex-col">
+            <textarea
+              id="research-input"
+              placeholder="Ask about a stock, upload a file, or start research…"
+              rows="3"
+              class="flex-1 w-full bg-gray-800 text-white rounded-lg px-4 pt-3 pb-8 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500"
+            ></textarea>
+            <div class="absolute bottom-2 right-2 flex gap-1">
+              <button id="research-attach-toggle"
+                class="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors"
+                title="Attach file path">
+                📎
+              </button>
+              <button id="research-think-toggle"
+                class="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors"
+                title="Toggle thinking mode">
+                Think
+              </button>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2 w-20">
+            <button id="research-submit"
+              class="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Inject server-side config for JS -->
   <script>const GOOGLE_CLIENT_ID = "{{ google_client_id }}";</script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -230,5 +329,6 @@
   <script src="/static/js/calendar.js"></script>
   <script src="/static/js/morning_brief.js"></script>
   <script src="/static/js/settings.js"></script>
+  <script src="/static/js/research.js"></script>
 </body>
 </html>
