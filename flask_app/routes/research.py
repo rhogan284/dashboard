@@ -619,3 +619,100 @@ def chat() -> Response:
             yield (json.dumps({'error': str(exc)}) + '\n').encode()
 
     return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
+
+
+# ---------------------------------------------------------------------------
+# Background: summarise + title
+# ---------------------------------------------------------------------------
+
+@research_bp.route('/api/research/sessions/<int:session_id>/summarise', methods=['POST'])
+def summarise_session(session_id: int) -> Response:
+    with _get_db() as conn:
+        rows = conn.execute(
+            "SELECT role, content FROM research_messages WHERE session_id = ? ORDER BY created_at",
+            (session_id,),
+        ).fetchall()
+
+    if not rows:
+        return jsonify({'ok': True, 'summary': ''})
+
+    transcript = '\n'.join(f"{r['role'].upper()}: {r['content'][:500]}" for r in rows)
+    prompt = (
+        "Summarise this investment research conversation in 3-5 sentences. "
+        "Focus on key findings, tickers discussed, conclusions, and any open questions.\n\n"
+        f"{transcript}"
+    )
+
+    try:
+        resp = httpx.post(
+            f'{OLLAMA_URL}/api/chat',
+            json={
+                'model': DEFAULT_MODEL,
+                'messages': [{'role': 'user', 'content': prompt}],
+                'stream': False,
+                'options': {'num_ctx': 8192, 'num_predict': 512},
+            },
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        summary = resp.json()['message'].get('content', '').strip()
+        if '<think>' in summary:
+            summary = summary.split('</think>', 1)[-1].strip()
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
+    with _get_db() as conn:
+        conn.execute(
+            "UPDATE research_sessions SET auto_summary = ? WHERE id = ?",
+            (summary, session_id),
+        )
+        conn.commit()
+
+    return jsonify({'ok': True, 'summary': summary})
+
+
+@research_bp.route('/api/research/sessions/<int:session_id>/title', methods=['GET'])
+def get_session_title(session_id: int) -> Response:
+    with _get_db() as conn:
+        rows = conn.execute(
+            "SELECT role, content FROM research_messages WHERE session_id = ? ORDER BY created_at LIMIT 4",
+            (session_id,),
+        ).fetchall()
+
+    if not rows:
+        return jsonify({'title': 'New session'})
+
+    exchange = '\n'.join(f"{r['role']}: {r['content'][:200]}" for r in rows)
+    prompt = (
+        "Generate a short (5-8 word) descriptive title for this investment research conversation. "
+        "Return only the title, no quotes, no punctuation at the end.\n\n"
+        f"{exchange}"
+    )
+
+    try:
+        resp = httpx.post(
+            f'{OLLAMA_URL}/api/chat',
+            json={
+                'model': DEFAULT_MODEL,
+                'messages': [{'role': 'user', 'content': prompt}],
+                'stream': False,
+                'options': {'num_ctx': 4096, 'num_predict': 32},
+            },
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        title = resp.json()['message'].get('content', '').strip()
+        if '<think>' in title:
+            title = title.split('</think>', 1)[-1].strip()
+        title = title[:100]
+    except Exception:
+        return jsonify({'title': 'Research session'})
+
+    with _get_db() as conn:
+        conn.execute(
+            "UPDATE research_sessions SET title = ? WHERE id = ?",
+            (title, session_id),
+        )
+        conn.commit()
+
+    return jsonify({'title': title})

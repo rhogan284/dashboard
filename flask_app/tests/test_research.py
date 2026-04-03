@@ -221,3 +221,49 @@ def test_chat_persists_messages_to_db(client):
     roles = [m['role'] for m in session['messages']]
     assert 'user' in roles
     assert 'assistant' in roles
+
+
+# ── Summarise + title endpoints ───────────────────────────────────────────────
+
+def test_summarise_empty_session_returns_ok(client):
+    session_id = client.post('/api/research/sessions').get_json()['id']
+    response = client.post(f'/api/research/sessions/{session_id}/summarise')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['ok'] is True
+    assert data['summary'] == ''
+
+
+def test_summarise_session_calls_ollama_and_saves(client):
+    session_id = client.post('/api/research/sessions').get_json()['id']
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('Response text')):
+        client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'Analyse AAPL'}],
+        })
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('Summary of AAPL research.')):
+        response = client.post(f'/api/research/sessions/{session_id}/summarise')
+    assert response.status_code == 200
+    assert response.get_json()['ok'] is True
+    session = client.get(f'/api/research/sessions/{session_id}').get_json()
+    assert session['auto_summary'] == 'Summary of AAPL research.'
+
+
+def test_get_title_returns_new_session_for_empty(client):
+    session_id = client.post('/api/research/sessions').get_json()['id']
+    response = client.get(f'/api/research/sessions/{session_id}/title')
+    assert response.status_code == 200
+    assert response.get_json()['title'] == 'New session'
+
+
+def test_get_title_calls_ollama_and_saves(client):
+    session_id = client.post('/api/research/sessions').get_json()['id']
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('AAPL earnings analysis')):
+        client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'What are AAPL earnings?'}],
+        })
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('AAPL Q1 Earnings Deep Dive')):
+        response = client.get(f'/api/research/sessions/{session_id}/title')
+    assert response.status_code == 200
+    assert response.get_json()['title'] == 'AAPL Q1 Earnings Deep Dive'
