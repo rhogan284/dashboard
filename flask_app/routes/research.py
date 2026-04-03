@@ -497,6 +497,34 @@ _RESEARCH_TOOL_HANDLERS = {
 }
 
 # ---------------------------------------------------------------------------
+# Market context helper (free yfinance data prepended to review prompt)
+# ---------------------------------------------------------------------------
+
+def _build_market_context() -> str:
+    import yfinance as yf
+    indices = [
+        ('S&P 500',         '^GSPC'),
+        ('ASX 200',         '^AXJO'),
+        ('VIX',             '^VIX'),
+        ('USD Index (DXY)', 'DX-Y.NYB'),
+    ]
+    lines = ['## Market Context (at time of review)', '']
+    for label, symbol in indices:
+        try:
+            info = yf.Ticker(symbol).info
+            price = info.get('regularMarketPrice') or info.get('currentPrice', 'N/A')
+            change_pct = info.get('regularMarketChangePercent')
+            if change_pct is not None:
+                lines.append(f'- **{label}**: {price} ({change_pct:+.2f}%)')
+            else:
+                lines.append(f'- **{label}**: {price}')
+        except Exception:
+            lines.append(f'- **{label}**: unavailable')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Chat route
 # ---------------------------------------------------------------------------
 

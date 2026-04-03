@@ -173,6 +173,33 @@ def test_read_local_file_unsupported_type(tmp_path):
     assert 'Unsupported' in result
 
 
+# ── Market context helper ─────────────────────────────────────────────────────
+
+def test_build_market_context_returns_formatted_block():
+    from routes.research import _build_market_context
+    mock_info = {
+        'regularMarketPrice': 5000.0,
+        'regularMarketChangePercent': -1.5,
+    }
+    with patch('yfinance.Ticker') as mock_ticker_class:
+        mock_ticker = MagicMock()
+        mock_ticker.info = mock_info
+        mock_ticker_class.return_value = mock_ticker
+        result = _build_market_context()
+    assert '## Market Context' in result
+    assert 'S&P 500' in result
+    assert '5000' in result
+    assert '-1.50%' in result
+
+
+def test_build_market_context_handles_yfinance_failure():
+    from routes.research import _build_market_context
+    with patch('yfinance.Ticker', side_effect=Exception('network error')):
+        result = _build_market_context()
+    assert '## Market Context' in result
+    assert 'unavailable' in result
+
+
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
 from unittest.mock import MagicMock, patch
