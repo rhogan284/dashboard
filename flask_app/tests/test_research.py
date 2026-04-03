@@ -171,3 +171,53 @@ def test_read_local_file_unsupported_type(tmp_path):
     from routes.research import _read_local_file
     result = _read_local_file({'path': str(p)})
     assert 'Unsupported' in result
+
+
+# ── Chat endpoint ─────────────────────────────────────────────────────────────
+
+from unittest.mock import MagicMock, patch
+
+
+def _mock_ollama_response(content='Test response'):
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        'message': {'role': 'assistant', 'content': content, 'tool_calls': None}
+    }
+    return mock_resp
+
+
+def test_chat_requires_session_id_and_messages(client):
+    response = client.post('/api/research/chat', json={})
+    assert response.status_code == 400
+
+
+def test_chat_streams_ndjson(client):
+    session_id = client.post('/api/research/sessions').get_json()['id']
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('Hello!')):
+        response = client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'Hi'}],
+            'think': False,
+        })
+    assert response.status_code == 200
+    assert response.content_type == 'application/x-ndjson'
+    lines = [l for l in response.data.decode().strip().split('\n') if l]
+    assert len(lines) >= 1
+    import json as _json
+    data = _json.loads(lines[-1])
+    assert 'message' in data
+    assert data['message']['content'] == 'Hello!'
+
+
+def test_chat_persists_messages_to_db(client):
+    session_id = client.post('/api/research/sessions').get_json()['id']
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('World!')):
+        client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'Hello'}],
+        })
+    session = client.get(f'/api/research/sessions/{session_id}').get_json()
+    roles = [m['role'] for m in session['messages']]
+    assert 'user' in roles
+    assert 'assistant' in roles

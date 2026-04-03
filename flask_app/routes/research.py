@@ -187,6 +187,26 @@ def delete_pinboard_note(note_id: int):
     return jsonify({'ok': True})
 
 
+def _save_message(session_id: int, role: str, content: str):
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_db() as conn:
+        conn.execute(
+            "INSERT INTO research_messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, role, content, now),
+        )
+        conn.commit()
+
+
+def _touch_session(session_id: int):
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_db() as conn:
+        conn.execute(
+            "UPDATE research_sessions SET updated_at = ? WHERE id = ?",
+            (now, session_id),
+        )
+        conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
@@ -475,3 +495,127 @@ _RESEARCH_TOOL_HANDLERS = {
     'query_portfolio':    _query_portfolio,
     'read_local_file':    _read_local_file,
 }
+
+# ---------------------------------------------------------------------------
+# Chat route
+# ---------------------------------------------------------------------------
+
+@research_bp.route('/api/research/chat', methods=['POST'])
+def chat() -> Response:
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('session_id')
+    messages = data.get('messages')
+    if not session_id or not messages or not isinstance(messages, list):
+        return Response(
+            '{"error": "session_id and messages required"}',
+            status=400,
+            mimetype='application/json',
+        )
+    think = bool(data.get('think', False))
+
+    today = datetime.now().strftime('%A, %B %-d, %Y')
+    utc_offset = datetime.now().astimezone().strftime('%z')
+    offset_str = f"{utc_offset[:3]}:{utc_offset[3:]}"
+
+    # Build memory context
+    with _get_db() as conn:
+        pinboard_rows = conn.execute(
+            "SELECT title, content, tags FROM research_pinboard ORDER BY created_at DESC"
+        ).fetchall()
+        summary_rows = conn.execute(
+            "SELECT auto_summary FROM research_sessions "
+            "WHERE auto_summary IS NOT NULL AND auto_summary != '' "
+            "AND id != ? "
+            "ORDER BY updated_at DESC LIMIT 5",
+            (session_id,),
+        ).fetchall()
+
+    pinboard_text = '\n\n'.join(
+        f"**{r['title']}** [{r['tags']}]\n{r['content']}" for r in pinboard_rows
+    ) if pinboard_rows else '(no notes yet)'
+
+    summaries_text = '\n\n'.join(
+        f"- {r['auto_summary']}" for r in summary_rows
+    ) if summary_rows else '(no past sessions)'
+
+    portfolio_holdings = _query_portfolio({'operation': 'holdings'})
+
+    system_content = (
+        f"You are an investment research assistant for Ryan Hogan.\n"
+        f"Today is {today}. Your local UTC offset is {offset_str}.\n"
+        "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
+        "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
+        f"=== Portfolio Holdings ===\n{portfolio_holdings}\n\n"
+        f"=== Investment Notes & Theses ===\n{pinboard_text}\n\n"
+        f"=== Past Research Summaries ===\n{summaries_text}"
+    )
+    system_msg = {'role': 'system', 'content': system_content}
+
+    def generate():
+        loop_messages = [system_msg] + list(messages)
+
+        # Persist the incoming user message (last item)
+        last = messages[-1]
+        if last.get('role') == 'user':
+            _save_message(session_id, 'user', last['content'])
+
+        try:
+            while True:
+                resp = httpx.post(
+                    f'{OLLAMA_URL}/api/chat',
+                    json={
+                        'model': DEFAULT_MODEL,
+                        'messages': loop_messages,
+                        'tools': RESEARCH_TOOLS,
+                        'stream': False,
+                        'think': think,
+                        'options': {
+                            'num_ctx': 16384,
+                            'num_predict': 4096 if think else -1,
+                        },
+                    },
+                    timeout=300.0 if think else 120.0,
+                )
+                resp.raise_for_status()
+
+                msg = resp.json()['message']
+                tool_calls = msg.get('tool_calls') or []
+
+                if not tool_calls:
+                    content = msg.get('content', '')
+                    if '<think>' in content:
+                        content = content.split('</think>', 1)[-1].strip()
+                    _save_message(session_id, 'assistant', content)
+                    _touch_session(session_id)
+                    yield (json.dumps({'message': {'content': content}}) + '\n').encode()
+                    break
+
+                loop_messages.append(msg)
+
+                for tc in tool_calls:
+                    fn = tc.get('function', {})
+                    name = fn.get('name', '')
+                    args = fn.get('arguments', {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+
+                    label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
+                    yield (json.dumps({'status': label}) + '\n').encode()
+
+                    handler = _RESEARCH_TOOL_HANDLERS.get(name)
+                    result = handler(args) if handler else f'Unknown tool: {name}'
+
+                    _save_message(session_id, 'tool', result)
+                    loop_messages.append({'role': 'tool', 'content': result})
+
+        except httpx.ConnectError:
+            yield b'{"error": "Cannot connect to Ollama. Is it running?"}\n'
+        except httpx.HTTPStatusError as exc:
+            yield (json.dumps({'error': f'Ollama error: {exc.response.status_code}'}) + '\n').encode()
+        except Exception as exc:
+            yield (json.dumps({'error': str(exc)}) + '\n').encode()
+
+    return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
