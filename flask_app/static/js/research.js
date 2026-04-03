@@ -23,6 +23,7 @@
   const submitBtn       = document.getElementById('research-submit');
   const thinkToggleBtn  = document.getElementById('research-think-toggle');
   const attachToggle    = document.getElementById('research-attach-toggle');
+  const reviewBtn        = document.getElementById('research-portfolio-review');
   const filePathInput   = document.getElementById('research-file-path');
   const filePathRow     = document.getElementById('research-file-path-row');
 
@@ -336,6 +337,84 @@
     fetch(`/api/research/sessions/${sessionId}/summarise`, { method: 'POST' }).catch(() => {});
   }
 
+  // ── Portfolio Review ───────────────────────────────────────────────────────────
+
+  async function startPortfolioReview() {
+    reviewBtn.disabled = true;
+    reviewBtn.textContent = 'Reviewing…';
+
+    triggerSummarise(activeSessionId);
+
+    // Show a short placeholder bubble instead of the full prompt
+    const today = new Date().toLocaleDateString('en-AU', {
+      day: '2-digit', month: 'short', year: 'numeric',
+    });
+    messages = [{ role: 'user', content: `Portfolio Review — ${today}` }];
+    renderHistory();
+    startTimer();
+    errorP.classList.add('hidden');
+
+    const streamBubble = document.createElement('div');
+    streamBubble.className =
+      'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] prose prose-sm prose-invert max-w-none';
+    historyDiv.appendChild(streamBubble);
+    scrollToBottom();
+
+    let assistantContent = '';
+
+    try {
+      const response = await fetch('/api/research/review', { method: 'POST' });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || `Backend error: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split('\n').filter(Boolean)) {
+          try {
+            const data = JSON.parse(line);
+            if (data.error) throw new Error(data.error);
+            if (data.session_id) {
+              activeSessionId = data.session_id;
+              loadSessions();
+            }
+            if (data.status) { toolStatus = data.status; }
+            const token = data.message?.content;
+            if (token) {
+              assistantContent += token;
+              streamBubble.innerHTML = marked.parse(assistantContent);
+              scrollToBottom();
+            }
+          } catch (parseErr) {
+            if (parseErr.message && !parseErr.message.startsWith('Unexpected')) throw parseErr;
+          }
+        }
+      }
+
+      messages.push({ role: 'assistant', content: assistantContent });
+      renderHistory();
+      refreshTitle();
+
+    } catch (err) {
+      messages = [];
+      streamBubble.remove();
+      renderHistory();
+      errorP.textContent = err.message || 'Failed to start portfolio review';
+      errorP.classList.remove('hidden');
+    } finally {
+      stopTimer();
+      reviewBtn.disabled = false;
+      reviewBtn.textContent = 'Portfolio Review';
+    }
+  }
+
   async function refreshTitle() {
     if (!activeSessionId) return;
     try {
@@ -463,6 +542,7 @@
   // ── Event listeners ────────────────────────────────────────────────────────────
 
   newChatBtn.addEventListener('click', createNewSession);
+  reviewBtn.addEventListener('click', startPortfolioReview);
 
   submitBtn.addEventListener('click', submit);
 
