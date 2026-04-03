@@ -123,3 +123,63 @@ def delete_session(session_id: int):
         conn.execute("DELETE FROM research_sessions WHERE id = ?", (session_id,))
         conn.commit()
     return jsonify({'ok': True})
+
+
+# ---------------------------------------------------------------------------
+# Pinboard routes
+# ---------------------------------------------------------------------------
+
+@research_bp.route('/api/research/pinboard', methods=['GET'])
+def list_pinboard():
+    with _get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, title, content, tags, created_at, updated_at FROM research_pinboard ORDER BY created_at DESC"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@research_bp.route('/api/research/pinboard', methods=['POST'])
+def add_pinboard_note():
+    data = request.get_json(silent=True) or {}
+    title = str(data.get('title', '')).strip()
+    content = str(data.get('content', '')).strip()
+    tags = str(data.get('tags', '')).strip()
+    if not title:
+        return jsonify({'error': 'title required'}), 400
+    now = datetime.now(timezone.utc).isoformat()
+    with _get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO research_pinboard (title, content, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (title, content, tags, now, now),
+        )
+        conn.commit()
+    return jsonify({'id': cur.lastrowid})
+
+
+@research_bp.route('/api/research/pinboard/<int:note_id>', methods=['PATCH'])
+def update_pinboard_note(note_id: int):
+    data = request.get_json(silent=True) or {}
+    now = datetime.now(timezone.utc).isoformat()
+    fields = []
+    values = []
+    for col in ('title', 'content', 'tags'):
+        if col in data:
+            fields.append(f"{col} = ?")
+            values.append(str(data[col]))
+    if not fields:
+        return jsonify({'error': 'nothing to update'}), 400
+    fields.append("updated_at = ?")
+    values.append(now)
+    values.append(note_id)
+    with _get_db() as conn:
+        conn.execute(f"UPDATE research_pinboard SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+    return jsonify({'ok': True})
+
+
+@research_bp.route('/api/research/pinboard/<int:note_id>', methods=['DELETE'])
+def delete_pinboard_note(note_id: int):
+    with _get_db() as conn:
+        conn.execute("DELETE FROM research_pinboard WHERE id = ?", (note_id,))
+        conn.commit()
+    return jsonify({'ok': True})
