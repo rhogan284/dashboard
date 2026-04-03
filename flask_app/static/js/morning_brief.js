@@ -6,6 +6,7 @@
     dashboard: document.getElementById('tab-dashboard'),
     brief: document.getElementById('tab-brief'),
     portfolio: document.getElementById('tab-portfolio'),
+    research: document.getElementById('tab-research'),
   };
   const tabBtns = document.querySelectorAll('.tab-btn');
 
@@ -24,7 +25,16 @@
     }, { once: true });
   }
 
+  let currentTab = 'dashboard';
+
   function activateTab(name) {
+    if (currentTab === 'research' && name !== 'research') {
+      window.researchWillLeave?.();
+    }
+    if (name === 'research') {
+      window.researchTabActivated?.();
+    }
+    currentTab = name;
     Object.entries(tabs).forEach(([key, el]) => {
       if (!el) return;
       el.classList.toggle('hidden', key !== name);
