@@ -115,3 +115,59 @@ def test_delete_pinboard_note(client):
     assert response.status_code == 200
     assert response.get_json()['ok'] is True
     assert client.get('/api/research/pinboard').get_json() == []
+
+
+# ── Tool handlers ─────────────────────────────────────────────────────────────
+
+import sqlite3 as _sqlite3
+
+from routes.research import _query_portfolio, _read_local_file
+
+
+def test_query_portfolio_missing_db(tmp_path):
+    import routes.research as rr
+    rr.PORTFOLIO_DB_PATH = str(tmp_path / 'nonexistent.db')
+    result = rr._query_portfolio({'operation': 'holdings'})
+    assert 'Portfolio query error' in result
+
+
+def test_query_portfolio_holdings(tmp_path):
+    db_path = tmp_path / 'portfolio.db'
+    conn = _sqlite3.connect(str(db_path))
+    conn.execute("""CREATE TABLE holdings (
+        ticker TEXT, platform TEXT, units REAL, avg_cost REAL, sleeve TEXT
+    )""")
+    conn.execute("INSERT INTO holdings VALUES ('AAPL', 'IB', 10, 150.0, 'Core')")
+    conn.commit()
+    conn.close()
+
+    import routes.research as rr
+    rr.PORTFOLIO_DB_PATH = str(db_path)
+
+    result = rr._query_portfolio({'operation': 'holdings'})
+    assert 'AAPL' in result
+    assert 'IB' in result
+
+
+def test_read_local_file_csv(tmp_path):
+    csv_path = tmp_path / 'test.csv'
+    csv_path.write_text("ticker,value\nAAPL,100\nGOOG,200\n")
+
+    from routes.research import _read_local_file
+    result = _read_local_file({'path': str(csv_path)})
+    assert 'AAPL' in result
+    assert 'GOOG' in result
+
+
+def test_read_local_file_missing():
+    from routes.research import _read_local_file
+    result = _read_local_file({'path': '/tmp/does_not_exist_xyz.csv'})
+    assert 'not found' in result.lower()
+
+
+def test_read_local_file_unsupported_type(tmp_path):
+    p = tmp_path / 'file.txt'
+    p.write_text('hello')
+    from routes.research import _read_local_file
+    result = _read_local_file({'path': str(p)})
+    assert 'Unsupported' in result

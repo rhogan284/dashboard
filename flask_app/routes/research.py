@@ -9,6 +9,8 @@ import httpx
 # Response, stream_with_context, jsonify, request are used by route handlers added in later tasks
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
+from routes.llm import _search_web
+
 research_bp = Blueprint('research', __name__)
 
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
@@ -183,3 +185,293 @@ def delete_pinboard_note(note_id: int):
         conn.execute("DELETE FROM research_pinboard WHERE id = ?", (note_id,))
         conn.commit()
     return jsonify({'ok': True})
+
+
+# ---------------------------------------------------------------------------
+# Tool definitions
+# ---------------------------------------------------------------------------
+
+RESEARCH_TOOLS = [
+    {
+        'type': 'function',
+        'function': {
+            'name': 'search_web',
+            'description': (
+                'Search the web for current information using Tavily. '
+                'Use for general research, company news, and macroeconomic data.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'query': {'type': 'string', 'description': 'The search query'},
+                },
+                'required': ['query'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_stock_data',
+            'description': 'Get stock price, fundamentals, or price history for a ticker via yfinance.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'ticker': {
+                        'type': 'string',
+                        'description': 'Ticker symbol, e.g. AAPL or ASX:GOLD',
+                    },
+                    'info_type': {
+                        'type': 'string',
+                        'enum': ['price', 'fundamentals', 'history'],
+                        'description': 'Type of data: current price, fundamental metrics, or OHLCV history',
+                    },
+                    'period': {
+                        'type': 'string',
+                        'description': 'For history only — period string like 1mo, 3mo, 6mo, 1y',
+                    },
+                },
+                'required': ['ticker', 'info_type'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_financial_news',
+            'description': 'Search for financial and market news using Tavily, scoped to news sources.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'query': {
+                        'type': 'string',
+                        'description': 'Search query, e.g. "CRDO earnings outlook 2026"',
+                    },
+                    'tickers': {
+                        'type': 'array',
+                        'items': {'type': 'string'},
+                        'description': 'Optional list of tickers appended to the query for specificity',
+                    },
+                },
+                'required': ['query'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'query_portfolio',
+            'description': "Read-only access to the user's portfolio database.",
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'operation': {
+                        'type': 'string',
+                        'enum': ['holdings', 'trades', 'performance'],
+                        'description': 'holdings = all positions; trades = last 50 by date; performance = monthly snapshots',
+                    },
+                },
+                'required': ['operation'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'read_local_file',
+            'description': 'Read a local PDF, CSV, or XLSX file and return its text content.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'path': {
+                        'type': 'string',
+                        'description': 'Absolute path to the file on disk',
+                    },
+                    'sheet': {
+                        'type': 'string',
+                        'description': 'For .xlsx files: sheet name to read (default: first sheet)',
+                    },
+                },
+                'required': ['path'],
+            },
+        },
+    },
+]
+
+_TOOL_STATUS = {
+    'search_web':         lambda a: f"Searching: \"{a.get('query', '')}\"",
+    'get_stock_data':     lambda a: f"Getting {a.get('info_type', 'data')} for {a.get('ticker', '')}…",
+    'get_financial_news': lambda a: f"Finding news: \"{a.get('query', '')}\"",
+    'query_portfolio':    lambda a: f"Querying portfolio ({a.get('operation', '')})…",
+    'read_local_file':    lambda a: f"Reading {Path(a.get('path', '')).name}…",
+}
+
+# ---------------------------------------------------------------------------
+# Tool handlers
+# ---------------------------------------------------------------------------
+
+
+def _get_stock_data(args: dict) -> str:
+    import yfinance as yf
+    ticker = args.get('ticker', '')
+    info_type = args.get('info_type', 'price')
+    period = args.get('period', '1mo')
+    try:
+        t = yf.Ticker(ticker)
+        if info_type == 'price':
+            info = t.info
+            price = info.get('currentPrice') or info.get('regularMarketPrice', 'N/A')
+            currency = info.get('currency', '')
+            prev_close = info.get('previousClose', 'N/A')
+            day_high = info.get('dayHigh', 'N/A')
+            day_low = info.get('dayLow', 'N/A')
+            return (
+                f"{ticker}: {price} {currency}\n"
+                f"Prev Close: {prev_close} | Day High: {day_high} | Day Low: {day_low}"
+            )
+        elif info_type == 'fundamentals':
+            info = t.info
+            fields = {
+                'Market Cap': info.get('marketCap'),
+                'P/E (TTM)': info.get('trailingPE'),
+                'P/E (Fwd)': info.get('forwardPE'),
+                'EPS (TTM)': info.get('trailingEps'),
+                'Revenue': info.get('totalRevenue'),
+                'Gross Margin': info.get('grossMargins'),
+                'Debt/Equity': info.get('debtToEquity'),
+                '52W High': info.get('fiftyTwoWeekHigh'),
+                '52W Low': info.get('fiftyTwoWeekLow'),
+                'Sector': info.get('sector'),
+                'Industry': info.get('industry'),
+            }
+            lines = [f"{k}: {v}" for k, v in fields.items() if v is not None]
+            return '\n'.join(lines) or 'No fundamentals data available.'
+        elif info_type == 'history':
+            hist = t.history(period=period)
+            if hist.empty:
+                return 'No history data available.'
+            lines = []
+            for date, row in hist.tail(20).iterrows():
+                lines.append(
+                    f"{date.date()}: Open={row['Open']:.2f} "
+                    f"Close={row['Close']:.2f} "
+                    f"Vol={int(row['Volume'])}"
+                )
+            return '\n'.join(lines)
+        else:
+            return f"Unknown info_type: {info_type}"
+    except Exception as exc:
+        return f"Stock data error for {ticker}: {exc}"
+
+
+def _get_financial_news(args: dict) -> str:
+    from tavily import TavilyClient
+    api_key = os.getenv('TAVILY_API_KEY', '')
+    if not api_key:
+        return 'Error: TAVILY_API_KEY not configured.'
+    query = args.get('query', '')
+    tickers = args.get('tickers', [])
+    if tickers:
+        query = query + ' ' + ' '.join(tickers)
+    try:
+        results = TavilyClient(api_key=api_key).search(query, max_results=5, topic='news')
+        lines = []
+        for item in results.get('results', []):
+            lines.append(f"• {item.get('title', '')}")
+            content = item.get('content', '')[:300]
+            if content:
+                lines.append(f"  {content}")
+            url = item.get('url', '')
+            if url:
+                lines.append(f"  {url}")
+            lines.append('')
+        return '\n'.join(lines).strip() or 'No news found.'
+    except Exception as exc:
+        return f'News search error: {exc}'
+
+
+def _query_portfolio(args: dict) -> str:
+    operation = args.get('operation', 'holdings')
+    try:
+        conn = sqlite3.connect(PORTFOLIO_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        try:
+            if operation == 'holdings':
+                cur.execute(
+                    "SELECT ticker, platform, units, avg_cost, sleeve FROM holdings ORDER BY ticker"
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    return 'No holdings found.'
+                header = 'Ticker | Platform | Units | Avg Cost | Sleeve'
+                lines = [header] + [
+                    f"{r['ticker']} | {r['platform']} | {r['units']} | {r['avg_cost']} | {r['sleeve']}"
+                    for r in rows
+                ]
+                return '\n'.join(lines)
+            elif operation == 'trades':
+                cur.execute("SELECT * FROM trades ORDER BY date DESC LIMIT 50")
+                rows = cur.fetchall()
+                if not rows:
+                    return 'No trades found.'
+                keys = rows[0].keys()
+                lines = [' | '.join(keys)] + [
+                    ' | '.join(str(r[k]) for k in keys) for r in rows
+                ]
+                return '\n'.join(lines)
+            elif operation == 'performance':
+                cur.execute("SELECT * FROM monthly_tracker ORDER BY date DESC LIMIT 24")
+                rows = cur.fetchall()
+                if not rows:
+                    return 'No performance data found.'
+                keys = rows[0].keys()
+                lines = [' | '.join(keys)] + [
+                    ' | '.join(str(r[k]) for k in keys) for r in rows
+                ]
+                return '\n'.join(lines)
+            else:
+                return f"Unknown operation: {operation}"
+        finally:
+            conn.close()
+    except Exception as exc:
+        return f'Portfolio query error: {exc}'
+
+
+_MAX_FILE_CHARS = 24000  # ~6000 tokens
+
+
+def _read_local_file(args: dict) -> str:
+    path = args.get('path', '')
+    sheet = args.get('sheet')
+    p = Path(path)
+    if not p.exists():
+        return f"File not found: {path}"
+    suffix = p.suffix.lower()
+    try:
+        if suffix == '.pdf':
+            import pdfplumber
+            with pdfplumber.open(str(p)) as pdf:
+                text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
+        elif suffix == '.csv':
+            import pandas as pd
+            df = pd.read_csv(str(p))
+            text = df.to_string(index=False)
+        elif suffix == '.xlsx':
+            import pandas as pd
+            df = pd.read_excel(str(p), sheet_name=sheet or 0)
+            text = df.to_string(index=False)
+        else:
+            return f"Unsupported file type: {suffix}. Supported: .pdf, .csv, .xlsx"
+        return text[:_MAX_FILE_CHARS] if len(text) > _MAX_FILE_CHARS else text
+    except Exception as exc:
+        return f"Error reading {path}: {exc}"
+
+
+_RESEARCH_TOOL_HANDLERS = {
+    'search_web':         _search_web,
+    'get_stock_data':     _get_stock_data,
+    'get_financial_news': _get_financial_news,
+    'query_portfolio':    _query_portfolio,
+    'read_local_file':    _read_local_file,
+}
