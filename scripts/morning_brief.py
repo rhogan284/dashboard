@@ -282,6 +282,89 @@ def fetch_calendar(creds) -> list:
     return result.get('items', [])
 
 
+def fetch_canvas_brief() -> str:
+    """Fetch upcoming Canvas assignments and format as a markdown brief section."""
+    canvas_base = os.getenv('CANVAS_BASE_URL', '').rstrip('/')
+    canvas_key = os.getenv('CANVAS_KEY', '')
+    if not canvas_base or not canvas_key:
+        return ''
+
+    headers = {'Authorization': f'Bearer {canvas_key}'}
+
+    def canvas_get(path: str, params: dict | None = None) -> list:
+        url = f'{canvas_base}/api/v1{path}'
+        results = []
+        while url:
+            resp = httpx.get(url, headers=headers, params=params, timeout=20.0)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list):
+                results.extend(data)
+            else:
+                return [data]
+            link = resp.headers.get('Link', '')
+            url = None
+            params = None
+            for part in link.split(','):
+                part = part.strip()
+                if 'rel="next"' in part:
+                    url = part.split(';')[0].strip().strip('<>')
+                    break
+        return results
+
+    try:
+        courses = canvas_get('/courses', {'enrollment_state': 'active', 'per_page': 50})
+        now = datetime.now(timezone.utc)
+        week_end = now + timedelta(days=7)
+        due_this_week = []
+        overdue = []
+
+        for course in courses:
+            if not isinstance(course, dict) or not course.get('name'):
+                continue
+            try:
+                assignments = canvas_get(
+                    f'/courses/{course["id"]}/assignments',
+                    {'bucket': 'upcoming', 'order_by': 'due_at', 'per_page': 50},
+                )
+                for a in assignments:
+                    if not isinstance(a, dict) or not a.get('due_at'):
+                        continue
+                    try:
+                        due = datetime.fromisoformat(a['due_at'].replace('Z', '+00:00'))
+                    except ValueError:
+                        continue
+                    entry = (a.get('name', ''), due)
+                    if due < now:
+                        overdue.append(entry)
+                    elif due <= week_end:
+                        due_this_week.append(entry)
+            except Exception:
+                pass
+
+        due_this_week.sort(key=lambda x: x[1])
+        overdue.sort(key=lambda x: x[1])
+
+        lines = ['## 🎓 Academics', '']
+        if due_this_week:
+            lines.append('**Due this week:**')
+            for name, due in due_this_week:
+                lines.append(f'- {name} — {due.strftime("%a %b %-d")}')
+        else:
+            lines.append('**Due this week:** Nothing due')
+        lines.append('')
+        if overdue:
+            lines.append('**Overdue:**')
+            for name, due in overdue:
+                lines.append(f'- {name} (was due {due.strftime("%b %-d")})')
+        else:
+            lines.append('**Overdue:** None')
+
+        return '\n'.join(lines)
+    except Exception as exc:
+        return f'## 🎓 Academics\n\n(Canvas data unavailable: {exc})'
+
+
 def search_tavily(client, query: str) -> dict:
     """Run a single Tavily search query, returning results or an error."""
     try:
@@ -384,14 +467,15 @@ def build_calendar_md(calendar_data: list) -> str:
 """
 
 
-def assemble_brief(gmail_md: str, markets_md: str, calendar_md: str, today_str: str) -> str:
+def assemble_brief(gmail_md: str, markets_md: str, calendar_md: str, today_str: str, canvas_md: str = '') -> str:
     """Combine all markdown sections into the full brief."""
+    canvas_section = f'\n{canvas_md}\n' if canvas_md else ''
     return f"""# Morning Brief — {today_str}
 
 {gmail_md}
 
 {calendar_md}
-
+{canvas_section}
 {markets_md}
 """
 
@@ -449,9 +533,10 @@ def main():
     tavily_client = TavilyClient(api_key=os.getenv('TAVILY_API_KEY', ''))
 
     # Fetch all data in parallel
-    with ThreadPoolExecutor(max_workers=len(TAVILY_QUERIES) + 2) as executor:
+    with ThreadPoolExecutor(max_workers=len(TAVILY_QUERIES) + 3) as executor:
         gmail_future = executor.submit(fetch_gmail, creds)
         calendar_future = executor.submit(fetch_calendar, creds)
+        canvas_future = executor.submit(fetch_canvas_brief)
         search_futures = {
             q: executor.submit(search_tavily, tavily_client, q)
             for q in TAVILY_QUERIES
@@ -459,6 +544,7 @@ def main():
 
     gmail_data = gmail_future.result()
     calendar_data = calendar_future.result()
+    canvas_md = canvas_future.result()
     search_results = {q: f.result() for q, f in search_futures.items()}
 
     print(f'\n=== Gmail debug: {gmail_data["unread_count"]} unread, {len(gmail_data["messages"])} messages fetched ===', flush=True)
@@ -474,7 +560,7 @@ def main():
 
     print('Assembling brief…', flush=True)
     calendar_md = build_calendar_md(calendar_data)
-    brief_md = assemble_brief(gmail_md, markets_md, calendar_md, today_str)
+    brief_md = assemble_brief(gmail_md, markets_md, calendar_md, today_str, canvas_md)
 
     write_file(DATA_DIR / 'morning_brief.md', brief_md)
 

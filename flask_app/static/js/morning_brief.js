@@ -7,6 +7,7 @@
     brief: document.getElementById('tab-brief'),
     portfolio: document.getElementById('tab-portfolio'),
     research: document.getElementById('tab-research'),
+    canvas: document.getElementById('tab-canvas'),
   };
   const tabBtns = document.querySelectorAll('.tab-btn');
 
@@ -33,6 +34,9 @@
     }
     if (name === 'research') {
       window.researchTabActivated?.();
+    }
+    if (name === 'canvas') {
+      window.canvasTabActivated?.();
     }
     currentTab = name;
     Object.entries(tabs).forEach(([key, el]) => {

@@ -9,6 +9,8 @@ let mainWindow = null;
 const FLASK_PORT = 8001;
 const FLASK_URL = `http://localhost:${FLASK_PORT}`;
 
+const DASHBOARD_DIR = path.join('/Users', 'ryanhogan', 'Desktop', 'Coding Work', 'Dashboard');
+
 const PORTFOLIO_PORT = 8000;
 const PORTFOLIO_APP_DIR = path.join('/Users', 'ryanhogan', 'Desktop', 'Coding Work', 'portfolio_app');
 const PORTFOLIO_PYTHON = path.join(PORTFOLIO_APP_DIR, '.venv', 'bin', 'python');
@@ -27,9 +29,9 @@ function startPortfolio() {
 }
 
 function startFlask() {
-  const pythonPath = path.join(__dirname, '..', 'flask_app', '.venv', 'bin', 'python');
-  const appPath = path.join(__dirname, '..', 'flask_app', 'app.py');
-  const cwd = path.join(__dirname, '..', 'flask_app');
+  const pythonPath = path.join(DASHBOARD_DIR, 'flask_app', '.venv', 'bin', 'python');
+  const appPath = path.join(DASHBOARD_DIR, 'flask_app', 'app.py');
+  const cwd = path.join(DASHBOARD_DIR, 'flask_app');
 
   flaskProcess = spawn(pythonPath, [appPath], { cwd, env: { ...process.env } });
 

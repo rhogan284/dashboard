@@ -22,6 +22,7 @@ def create_app(config: dict | None = None) -> Flask:
     from routes.brief import brief_bp
     from routes.tasks import tasks_bp
     from routes.research import research_bp
+    from routes.canvas import canvas_bp
 
     app.register_blueprint(llm_bp)
     app.register_blueprint(notes_bp)
@@ -29,6 +30,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(brief_bp)
     app.register_blueprint(tasks_bp)
     app.register_blueprint(research_bp)
+    app.register_blueprint(canvas_bp)
 
     @app.route('/')
     def index():
