@@ -22,7 +22,17 @@
       "Bash(.venv/bin/python -m pytest tests/ -v)",
       "Bash(xxd)",
       "Bash(xargs -I{} cp \"/Users/ryanhogan/Desktop/{}\" /tmp/gmail_screenshot.png)",
-      "Bash(sqlite3 /Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db .schema)"
+      "Bash(sqlite3 /Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db .schema)",
+      "Bash(python -c \"import yfinance; import pdfplumber; import pandas; import openpyxl; print\\('All packages installed successfully'\\)\")",
+      "Bash(./flask_app/.venv/bin/python -c \"import yfinance; import pdfplumber; import pandas; import openpyxl; print\\('All packages installed successfully'\\)\")",
+      "Bash(./flask_app/.venv/bin/pip list:*)",
+      "Bash(.venv/bin/pytest tests/test_research.py::test_db_tables_created_on_startup -v)",
+      "Bash(.venv/bin/pytest tests/test_research.py -v)",
+      "Bash(.venv/bin/python -c \"import json, httpx, flask; print\\('ok'\\)\")",
+      "Bash(.venv/bin/python -m py_compile routes/research.py)",
+      "Bash(.venv/bin/python -m flake8 routes/research.py --select=F401)",
+      "Bash(.venv/bin/pytest tests/ -v)",
+      "Bash(.venv/bin/pytest tests/test_research.py -k \"session\" -v)"
     ]
   }
 }

@@ -119,6 +119,21 @@ def get_session(session_id: int):
     return jsonify({**dict(row), 'messages': [dict(m) for m in messages]})
 
 
+@research_bp.route('/api/research/sessions/<int:session_id>', methods=['PATCH'])
+def update_session(session_id: int):
+    data = request.get_json(silent=True) or {}
+    title = str(data.get('title', '')).strip()
+    if not title:
+        return jsonify({'error': 'title required'}), 400
+    with _get_db() as conn:
+        conn.execute(
+            "UPDATE research_sessions SET title = ? WHERE id = ?",
+            (title, session_id),
+        )
+        conn.commit()
+    return jsonify({'ok': True})
+
+
 @research_bp.route('/api/research/sessions/<int:session_id>', methods=['DELETE'])
 def delete_session(session_id: int):
     with _get_db() as conn:
@@ -727,9 +742,10 @@ def portfolio_review() -> Response:
                         'messages': loop_messages,
                         'tools': RESEARCH_TOOLS,
                         'stream': False,
-                        'options': {'num_ctx': 16384, 'num_predict': -1},
+                        'think': True,
+                        'options': {'num_ctx': 16384, 'num_predict': 4096},
                     },
-                    timeout=120.0,
+                    timeout=300.0,
                 )
                 resp.raise_for_status()
 

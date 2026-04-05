@@ -26,6 +26,7 @@
   const reviewBtn        = document.getElementById('research-portfolio-review');
   const filePathInput   = document.getElementById('research-file-path');
   const filePathRow     = document.getElementById('research-file-path-row');
+  const activityLogDiv  = document.getElementById('research-activity-log');
 
   // ── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -51,14 +52,13 @@
 
   function startTimer() {
     toolStatus = null;
+    activityLogDiv.innerHTML = '';
     const startTime = Date.now();
     thinkingDiv.classList.remove('hidden');
     timerSpan.textContent = 'Thinking… 0s';
     timerInterval = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      timerSpan.textContent = toolStatus
-        ? `${toolStatus} (${elapsed}s)`
-        : `Thinking… ${elapsed}s`;
+      timerSpan.textContent = `Thinking… ${elapsed}s`;
     }, 1000);
   }
 
@@ -66,8 +66,17 @@
     clearInterval(timerInterval);
     timerInterval = null;
     toolStatus = null;
+    activityLogDiv.innerHTML = '';
     thinkingDiv.classList.add('hidden');
     timerSpan.textContent = 'Thinking… 0s';
+  }
+
+  function logActivity(text) {
+    const line = document.createElement('div');
+    line.className = 'text-gray-500 text-xs';
+    line.textContent = `→ ${text}`;
+    activityLogDiv.appendChild(line);
+    scrollToBottom();
   }
 
   // ── Message rendering ──────────────────────────────────────────────────────────
@@ -102,10 +111,20 @@
     } catch (_) {}
   }
 
+  function updateActiveHighlight() {
+    for (const li of sessionList.children) {
+      const isActive = parseInt(li.dataset.id) === activeSessionId;
+      li.className = `flex items-start justify-between gap-1 px-2 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
+        isActive ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+      }`;
+    }
+  }
+
   function renderSessionList(sessions) {
     sessionList.innerHTML = '';
     for (const s of sessions) {
       const li = document.createElement('li');
+      li.dataset.id = s.id;
       const isActive = s.id === activeSessionId;
       li.className = `flex items-start justify-between gap-1 px-2 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
         isActive ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
@@ -114,7 +133,7 @@
       const left = document.createElement('div');
       left.className = 'flex-1 min-w-0';
       const title = document.createElement('div');
-      title.className = 'truncate text-xs font-medium';
+      title.className = 'truncate text-xs font-medium text-gray-100';
       title.textContent = s.title;
       const date = document.createElement('div');
       date.className = 'text-gray-500 text-xs mt-0.5';
@@ -146,19 +165,23 @@
 
   async function loadSession(id) {
     if (activeSessionId === id) return;
-    triggerSummarise(activeSessionId);
     activeSessionId = id;
+    updateActiveHighlight();
     try {
       const res = await fetch(`/api/research/sessions/${id}`);
       if (!res.ok) return;
+      if (activeSessionId !== id) return;  // user clicked away — discard stale response
       const data = await res.json();
       messages = data.messages
         .filter(m => m.role !== 'tool')
         .map(m => ({ role: m.role, content: m.content }));
       renderHistory();
-      loadSessions();
       errorP.classList.add('hidden');
+      if (data.title === 'New session' && messages.length > 0) {
+        refreshTitle();
+      }
     } catch (err) {
+      if (activeSessionId !== id) return;
       errorP.textContent = 'Failed to load session.';
       errorP.classList.remove('hidden');
     }
@@ -344,7 +367,6 @@
     reviewBtn.textContent = 'Reviewing…';
 
     triggerSummarise(activeSessionId);
-
     // Show a short placeholder bubble instead of the full prompt
     const today = new Date().toLocaleDateString('en-AU', {
       day: '2-digit', month: 'short', year: 'numeric',
@@ -384,7 +406,7 @@
             if (data.session_id) {
               activeSessionId = data.session_id;
             }
-            if (data.status) { toolStatus = data.status; }
+            if (data.status) { toolStatus = data.status; logActivity(data.status); }
             const token = data.message?.content;
             if (token) {
               assistantContent += token;
@@ -416,15 +438,18 @@
   }
 
   async function refreshTitle() {
-    if (!activeSessionId) return;
-    try {
-      const res = await fetch(`/api/research/sessions/${activeSessionId}/title`);
-      if (!res.ok) return;
-      const { title } = await res.json();
-      if (title && title !== 'New session') {
-        loadSessions();
-      }
-    } catch (_) {}
+    const id = activeSessionId;
+    if (!id || messages.length === 0) return;
+    const first = messages.find(m => m.role === 'user');
+    if (!first) return;
+    const line = first.content.split('\n')[0].trim();
+    if (!line || line.length < 3) return;
+    const title = line.length > 60 ? line.slice(0, 57) + '…' : line;
+    fetch(`/api/research/sessions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }).then(() => loadSessions()).catch(() => {});
   }
 
   // ── Submit ─────────────────────────────────────────────────────────────────────
@@ -484,7 +509,7 @@
           try {
             const data = JSON.parse(line);
             if (data.error) throw new Error(data.error);
-            if (data.status) { toolStatus = data.status; }
+            if (data.status) { toolStatus = data.status; logActivity(data.status); }
             const token = data.message?.content;
             if (token) {
               assistantContent += token;
