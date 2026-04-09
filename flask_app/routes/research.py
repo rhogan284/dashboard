@@ -526,13 +526,16 @@ def _build_market_context() -> str:
     lines = ['## Market Context (at time of review)', '']
     for label, symbol in indices:
         try:
-            info = yf.Ticker(symbol).info
-            price = info.get('regularMarketPrice') or info.get('currentPrice', 'N/A')
-            change_pct = info.get('regularMarketChangePercent')
-            if change_pct is not None:
-                lines.append(f'- **{label}**: {price} ({change_pct:+.2f}%)')
+            fi = yf.Ticker(symbol).fast_info
+            price = fi.last_price
+            prev_close = fi.previous_close
+            if price is not None and prev_close:
+                change_pct = (price - prev_close) / prev_close * 100
+                lines.append(f'- **{label}**: {price:.2f} ({change_pct:+.2f}%)')
+            elif price is not None:
+                lines.append(f'- **{label}**: {price:.2f}')
             else:
-                lines.append(f'- **{label}**: {price}')
+                lines.append(f'- **{label}**: unavailable')
         except Exception:
             lines.append(f'- **{label}**: unavailable')
     lines.append('')

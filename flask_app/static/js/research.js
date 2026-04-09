@@ -342,16 +342,13 @@
 
   // ── Session lifecycle ──────────────────────────────────────────────────────────
 
-  async function createNewSession() {
+  function createNewSession() {
     triggerSummarise(activeSessionId);
-    const res = await fetch('/api/research/sessions', { method: 'POST' });
-    if (!res.ok) return;
-    const { id } = await res.json();
-    activeSessionId = id;
+    activeSessionId = null;
     messages = [];
     renderHistory();
     errorP.classList.add('hidden');
-    loadSessions();
+    updateActiveHighlight();
     input.focus();
   }
 
@@ -553,15 +550,6 @@
   window.researchTabActivated = function () {
     loadSessions();
     loadPinboard();
-    if (!activeSessionId) {
-      fetch('/api/research/sessions', { method: 'POST' })
-        .then(r => r.json())
-        .then(({ id }) => {
-          activeSessionId = id;
-          loadSessions();
-        })
-        .catch(() => {});
-    }
   };
 
   // ── Event listeners ────────────────────────────────────────────────────────────

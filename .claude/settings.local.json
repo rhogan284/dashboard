@@ -32,7 +32,9 @@
       "Bash(.venv/bin/python -m py_compile routes/research.py)",
       "Bash(.venv/bin/python -m flake8 routes/research.py --select=F401)",
       "Bash(.venv/bin/pytest tests/ -v)",
-      "Bash(.venv/bin/pytest tests/test_research.py -k \"session\" -v)"
+      "Bash(.venv/bin/pytest tests/test_research.py -k \"session\" -v)",
+      "Bash(/usr/local/bin/python3.12 -c \"import yfinance; print\\(yfinance.__version__\\)\")",
+      "Bash(flask_app/.venv/bin/python3 -c \"import yfinance; print\\(yfinance.__version__\\)\")"
     ]
   }
 }
