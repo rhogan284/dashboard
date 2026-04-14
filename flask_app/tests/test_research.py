@@ -375,14 +375,10 @@ def test_get_title_calls_ollama_and_saves(client):
 
 # ── Research memory helper ────────────────────────────────────────────────────
 
-from unittest.mock import patch as _patch
-from pathlib import Path as _Path
-
-
 def test_read_memory_returns_file_content(tmp_path):
     mem_file = tmp_path / 'research_memory'
     mem_file.write_text('Purpose & context\nRyan is a 22-year-old investor.', encoding='utf-8')
-    with _patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file):
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file):
         from routes.research import _read_memory
         result = _read_memory()
     assert 'Ryan is a 22-year-old investor.' in result
@@ -390,7 +386,7 @@ def test_read_memory_returns_file_content(tmp_path):
 
 def test_read_memory_returns_empty_string_when_file_missing(tmp_path):
     missing = tmp_path / 'no_such_file'
-    with _patch('routes.research.RESEARCH_MEMORY_PATH', new=missing):
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=missing):
         from routes.research import _read_memory
         result = _read_memory()
     assert result == ''
