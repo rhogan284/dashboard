@@ -40,3 +40,5 @@ electron/node_modules/
 .worktrees/
 /docs/
 /todo.md
+/flask_app/research_memory
+/dev_plan.md

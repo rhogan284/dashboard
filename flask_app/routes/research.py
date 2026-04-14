@@ -9,12 +9,12 @@ import httpx
 # Response, stream_with_context, jsonify, request are used by route handlers added in later tasks
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
-from routes.llm import _search_web
+from routes.llm import _search_web, _strip_thinking
 
 research_bp = Blueprint('research', __name__)
 
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
+DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
 PORTFOLIO_DB_PATH = os.getenv(
     'PORTFOLIO_DB_PATH',
     '/Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db',
@@ -628,9 +628,7 @@ def chat() -> Response:
                 tool_calls = msg.get('tool_calls') or []
 
                 if not tool_calls:
-                    content = msg.get('content', '')
-                    if '<think>' in content:
-                        content = content.split('</think>', 1)[-1].strip()
+                    content = _strip_thinking(msg.get('content', ''))
                     _save_message(session_id, 'assistant', content)
                     _touch_session(session_id)
                     yield (json.dumps({'message': {'content': content}}) + '\n').encode()
@@ -756,9 +754,7 @@ def portfolio_review() -> Response:
                 tool_calls = msg.get('tool_calls') or []
 
                 if not tool_calls:
-                    content = msg.get('content', '')
-                    if '<think>' in content:
-                        content = content.split('</think>', 1)[-1].strip()
+                    content = _strip_thinking(msg.get('content', ''))
                     _save_message(session_id, 'assistant', content)
                     _touch_session(session_id)
                     yield (json.dumps({'message': {'content': content}}) + '\n').encode()
@@ -830,9 +826,7 @@ def summarise_session(session_id: int) -> Response:
             timeout=120.0,
         )
         resp.raise_for_status()
-        summary = resp.json()['message'].get('content', '').strip()
-        if '<think>' in summary:
-            summary = summary.split('</think>', 1)[-1].strip()
+        summary = _strip_thinking(resp.json()['message'].get('content', ''))
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 
@@ -876,10 +870,7 @@ def get_session_title(session_id: int) -> Response:
             timeout=60.0,
         )
         resp.raise_for_status()
-        title = resp.json()['message'].get('content', '').strip()
-        if '<think>' in title:
-            title = title.split('</think>', 1)[-1].strip()
-        title = title[:100]
+        title = _strip_thinking(resp.json()['message'].get('content', ''))[:100]
     except Exception:
         return jsonify({'title': 'Research session'})
 

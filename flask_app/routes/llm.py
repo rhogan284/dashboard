@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
@@ -12,7 +13,20 @@ from flask import Blueprint, Response, current_app, request, stream_with_context
 llm_bp = Blueprint('llm', __name__)
 
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
+DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
+
+
+def _strip_thinking(content: str) -> str:
+    """Strip model thinking/reasoning blocks from response content.
+
+    Handles both Qwen3-style <think>...</think> and Gemma 4-style
+    <|channel>thought\\n...<channel|> blocks.
+    """
+    # Gemma 4: <|channel>thought\n...<channel|>
+    content = re.sub(r'<\|channel>thought\n.*?<channel\|>', '', content, flags=re.DOTALL)
+    # Qwen3 / legacy: <think>...</think>
+    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+    return content.strip()
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -171,7 +185,6 @@ def _load_google_creds(require_calendar_write: bool = False):
         if not has_write:
             raise PermissionError(
                 'Calendar write access not granted. '
-                'Please re-connect Gmail in the Morning Brief tab to allow calendar editing.'
             )
 
     return creds
@@ -340,9 +353,7 @@ def chat() -> Response:
                 tool_calls = msg.get('tool_calls') or []
 
                 if not tool_calls:
-                    content = msg.get('content', '')
-                    if '<think>' in content:
-                        content = content.split('</think>', 1)[-1].strip()
+                    content = _strip_thinking(msg.get('content', ''))
                     yield (json.dumps({'message': {'content': content}}) + '\n').encode()
                     break
 

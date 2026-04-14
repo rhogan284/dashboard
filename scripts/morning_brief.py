@@ -10,6 +10,7 @@ Run from project root:
 
 import json
 import os
+import re
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -382,7 +383,7 @@ def search_tavily(client, query: str) -> dict:
 def _call_ollama(prompt: str) -> str:
     """Make a single non-streaming Ollama call and return the response text."""
     ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-    model = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
+    model = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
 
     response = httpx.post(
         f'{ollama_url}/api/chat',
@@ -398,11 +399,11 @@ def _call_ollama(prompt: str) -> str:
     response.raise_for_status()
     raw = response.json()['message']['content'].strip()
 
-    # Strip <think>...</think> reasoning blocks (Qwen3 thinking mode)
-    if '<think>' in raw:
-        raw = raw.split('</think>', 1)[-1].strip()
+    # Strip model thinking blocks (Gemma 4: <|channel>thought\n...<channel|>, Qwen3: <think>...</think>)
+    raw = re.sub(r'<\|channel>thought\n.*?<channel\|>', '', raw, flags=re.DOTALL)
+    raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
 
-    return raw
+    return raw.strip()
 
 
 def summarise_gmail(gmail_data: dict) -> str:
