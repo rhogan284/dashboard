@@ -29,6 +29,44 @@ def _read_memory() -> str:
     except FileNotFoundError:
         return ''
 
+
+def _update_memory(transcript: str) -> None:
+    current = _read_memory()
+    transcript_trimmed = transcript[:_MEMORY_TRANSCRIPT_LIMIT]
+    prompt = (
+        "You are updating an investor memory file. Below is the current memory, "
+        "followed by a research session transcript.\n\n"
+        "Rewrite the memory file to reflect any new information from the session: "
+        "updated portfolio values, new positions, decisions made, macro context shifts, "
+        "new learnings or principles. Preserve all existing sections and their headings "
+        "exactly. Do not invent information not present in the session. If nothing in a "
+        "section changed, reproduce it unchanged.\n\n"
+        f"=== CURRENT MEMORY ===\n{current}\n\n"
+        f"=== SESSION TRANSCRIPT ===\n{transcript_trimmed}\n\n"
+        "Return only the updated memory file. No preamble, no explanation."
+    )
+    try:
+        resp = httpx.post(
+            f'{OLLAMA_URL}/api/chat',
+            json={
+                'model': DEFAULT_MODEL,
+                'messages': [{'role': 'user', 'content': prompt}],
+                'stream': False,
+                'options': {'num_ctx': 16384, 'num_predict': 4096},
+            },
+            timeout=300.0,
+        )
+        resp.raise_for_status()
+        updated = _strip_thinking(resp.json()['message'].get('content', '')).strip()
+        if not updated:
+            return
+        tmp = RESEARCH_MEMORY_PATH.with_suffix('.tmp')
+        tmp.write_text(updated, encoding='utf-8')
+        os.replace(tmp, RESEARCH_MEMORY_PATH)
+    except Exception as exc:
+        current_app.logger.warning('Memory update failed: %s', exc)
+
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -483,6 +521,7 @@ def _query_portfolio(args: dict) -> str:
 
 
 _MAX_FILE_CHARS = 24000  # ~6000 tokens
+_MEMORY_TRANSCRIPT_LIMIT = 8000
 
 
 def _read_local_file(args: dict) -> str:
@@ -848,6 +887,8 @@ def summarise_session(session_id: int) -> Response:
             (summary, session_id),
         )
         conn.commit()
+
+    _update_memory(transcript)
 
     return jsonify({'ok': True, 'summary': summary})
 

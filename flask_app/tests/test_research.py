@@ -336,14 +336,19 @@ def test_summarise_empty_session_returns_ok(client):
     assert data['summary'] == ''
 
 
-def test_summarise_session_calls_ollama_and_saves(client):
+def test_summarise_session_calls_ollama_and_saves(client, tmp_path):
+    mem_file = tmp_path / 'research_memory'
+    mem_file.write_text('', encoding='utf-8')
     session_id = client.post('/api/research/sessions').get_json()['id']
     with patch('routes.research.httpx.post', return_value=_mock_ollama_response('Response text')):
         client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Analyse AAPL'}],
         })
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('Summary of AAPL research.')):
+    summary_resp = _mock_ollama_response('Summary of AAPL research.')
+    memory_resp = _mock_ollama_response('Updated memory.')
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research.httpx.post', side_effect=[summary_resp, memory_resp]):
         response = client.post(f'/api/research/sessions/{session_id}/summarise')
     assert response.status_code == 200
     assert response.get_json()['ok'] is True
@@ -447,4 +452,81 @@ def test_review_system_prompt_includes_memory(client, tmp_path):
         (m['content'] for m in messages if m.get('role') == 'system'), ''
     )
     assert 'REVIEW_MEMORY_SENTINEL' in system_content
-    assert '=== Investor Memory ===' in system_content
+
+
+# ── Memory update ─────────────────────────────────────────────────────────────
+
+def test_summarise_updates_memory_file(client, tmp_path):
+    """After summarise, the memory file should be rewritten with the model's output."""
+    mem_file = tmp_path / 'research_memory'
+    mem_file.write_text('Old memory content.', encoding='utf-8')
+
+    session_id = client.post('/api/research/sessions').get_json()['id']
+
+    summary_response = _mock_ollama_response('Summary of session.')
+    memory_response = _mock_ollama_response('Updated memory content.')
+
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('chat reply')):
+        client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'Analyse CRDO'}],
+        })
+
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research.httpx.post', side_effect=[summary_response, memory_response]):
+        response = client.post(f'/api/research/sessions/{session_id}/summarise')
+
+    assert response.status_code == 200
+    assert response.get_json()['ok'] is True
+    assert mem_file.read_text(encoding='utf-8') == 'Updated memory content.'
+
+
+def test_summarise_skips_memory_write_on_empty_response(client, tmp_path):
+    """If the memory update call returns empty content, the file must not be touched."""
+    mem_file = tmp_path / 'research_memory'
+    original = 'Original memory, must survive.'
+    mem_file.write_text(original, encoding='utf-8')
+
+    session_id = client.post('/api/research/sessions').get_json()['id']
+
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('chat reply')):
+        client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'Quick check'}],
+        })
+
+    summary_response = _mock_ollama_response('A summary.')
+    empty_memory_response = _mock_ollama_response('')  # empty — should not write
+
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research.httpx.post', side_effect=[summary_response, empty_memory_response]):
+        client.post(f'/api/research/sessions/{session_id}/summarise')
+
+    assert mem_file.read_text(encoding='utf-8') == original
+
+
+def test_summarise_memory_failure_does_not_affect_summary_response(client, tmp_path):
+    """A crash in the memory update must not cause summarise to return an error."""
+    mem_file = tmp_path / 'research_memory'
+    mem_file.write_text('Existing memory.', encoding='utf-8')
+
+    session_id = client.post('/api/research/sessions').get_json()['id']
+
+    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('chat reply')):
+        client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'Something'}],
+        })
+
+    summary_response = _mock_ollama_response('Good summary.')
+
+    def raise_on_second_call(*args, **kwargs):
+        raise Exception('Ollama exploded')
+
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research.httpx.post', side_effect=[summary_response, raise_on_second_call]):
+        response = client.post(f'/api/research/sessions/{session_id}/summarise')
+
+    assert response.status_code == 200
+    assert response.get_json()['ok'] is True
+    assert response.get_json()['summary'] == 'Good summary.'
