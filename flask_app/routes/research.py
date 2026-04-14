@@ -21,6 +21,7 @@ PORTFOLIO_DB_PATH = os.getenv(
 )
 
 RESEARCH_MEMORY_PATH = Path(__file__).parent.parent / 'research_memory'
+_MEMORY_TRANSCRIPT_LIMIT = 8000
 
 
 def _read_memory() -> str:
@@ -521,7 +522,6 @@ def _query_portfolio(args: dict) -> str:
 
 
 _MAX_FILE_CHARS = 24000  # ~6000 tokens
-_MEMORY_TRANSCRIPT_LIMIT = 8000
 
 
 def _read_local_file(args: dict) -> str:

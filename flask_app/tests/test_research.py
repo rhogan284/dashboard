@@ -520,11 +520,8 @@ def test_summarise_memory_failure_does_not_affect_summary_response(client, tmp_p
 
     summary_response = _mock_ollama_response('Good summary.')
 
-    def raise_on_second_call(*args, **kwargs):
-        raise Exception('Ollama exploded')
-
     with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
-         patch('routes.research.httpx.post', side_effect=[summary_response, raise_on_second_call]):
+         patch('routes.research.httpx.post', side_effect=[summary_response, Exception('Ollama exploded')]):
         response = client.post(f'/api/research/sessions/{session_id}/summarise')
 
     assert response.status_code == 200
