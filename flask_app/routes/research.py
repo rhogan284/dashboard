@@ -888,6 +888,8 @@ def summarise_session(session_id: int) -> Response:
         )
         conn.commit()
 
+    # transcript is already truncated to 500 chars/message; _MEMORY_TRANSCRIPT_LIMIT
+    # applies a further ceiling on the full joined string to keep Ollama context manageable.
     _update_memory(transcript)
 
     return jsonify({'ok': True, 'summary': summary})

@@ -452,6 +452,7 @@ def test_review_system_prompt_includes_memory(client, tmp_path):
         (m['content'] for m in messages if m.get('role') == 'system'), ''
     )
     assert 'REVIEW_MEMORY_SENTINEL' in system_content
+    assert '=== Investor Memory ===' in system_content
 
 
 # ── Memory update ─────────────────────────────────────────────────────────────
