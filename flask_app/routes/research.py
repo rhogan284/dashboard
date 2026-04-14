@@ -593,14 +593,14 @@ def chat() -> Response:
         f"- {r['auto_summary']}" for r in summary_rows
     ) if summary_rows else '(no past sessions)'
 
-    portfolio_holdings = _query_portfolio({'operation': 'holdings'})
+    memory_text = _read_memory()
 
     system_content = (
         f"You are an investment research assistant for Ryan Hogan.\n"
         f"Today is {today}. Your local UTC offset is {offset_str}.\n"
         "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
         "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
-        f"=== Portfolio Holdings ===\n{portfolio_holdings}\n\n"
+        f"=== Investor Memory ===\n{memory_text}\n\n"
         f"=== Investment Notes & Theses ===\n{pinboard_text}\n\n"
         f"=== Past Research Summaries ===\n{summaries_text}"
     )
@@ -730,6 +730,8 @@ def portfolio_review() -> Response:
         f"**{r['title']}** [{r['tags']}]\n{r['content']}" for r in pinboard_rows
     ) if pinboard_rows else '(no notes yet)'
 
+    memory_text = _read_memory()
+
     system_msg = {
         'role': 'system',
         'content': (
@@ -737,6 +739,7 @@ def portfolio_review() -> Response:
             f"Today is {today}. Your local UTC offset is {offset_str}.\n"
             "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
             "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
+            f"=== Investor Memory ===\n{memory_text}\n\n"
             f"=== Investment Notes & Theses ===\n{pinboard_text}"
         ),
     }
@@ -766,6 +769,7 @@ def portfolio_review() -> Response:
                     content = _strip_thinking(msg.get('content', ''))
                     _save_message(session_id, 'assistant', content)
                     _touch_session(session_id)
+                    yield (json.dumps({'session_id': session_id}) + '\n').encode()
                     yield (json.dumps({'message': {'content': content}}) + '\n').encode()
                     break
 
@@ -794,11 +798,7 @@ def portfolio_review() -> Response:
         except Exception as exc:
             yield (json.dumps({'error': str(exc)}) + '\n').encode()
 
-    def generate_with_session_id():
-        yield (json.dumps({'session_id': session_id}) + '\n').encode()
-        yield from generate()
-
-    return Response(stream_with_context(generate_with_session_id()), mimetype='application/x-ndjson')
+    return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
 
 
 # ---------------------------------------------------------------------------

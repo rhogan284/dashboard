@@ -390,3 +390,62 @@ def test_read_memory_returns_empty_string_when_file_missing(tmp_path):
         from routes.research import _read_memory
         result = _read_memory()
     assert result == ''
+
+
+# ── Memory injection into system prompts ─────────────────────────────────────
+
+def test_chat_system_prompt_includes_memory(client, tmp_path):
+    mem_file = tmp_path / 'research_memory'
+    mem_file.write_text('MEMORY_SENTINEL_VALUE', encoding='utf-8')
+
+    session_id = client.post('/api/research/sessions').get_json()['id']
+
+    captured_calls = []
+
+    def capture_post(url, **kwargs):
+        captured_calls.append(kwargs.get('json', {}))
+        return _mock_ollama_response('ok')
+
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research.httpx.post', side_effect=capture_post):
+        client.post('/api/research/chat', json={
+            'session_id': session_id,
+            'messages': [{'role': 'user', 'content': 'Hi'}],
+        })
+
+    assert captured_calls, 'httpx.post was never called'
+    messages = captured_calls[0].get('messages', [])
+    system_content = next(
+        (m['content'] for m in messages if m.get('role') == 'system'), ''
+    )
+    assert 'MEMORY_SENTINEL_VALUE' in system_content
+    assert '=== Investor Memory ===' in system_content
+
+
+def test_review_system_prompt_includes_memory(client, tmp_path):
+    mem_file = tmp_path / 'research_memory'
+    mem_file.write_text('REVIEW_MEMORY_SENTINEL', encoding='utf-8')
+
+    mock_get = MagicMock()
+    mock_get.raise_for_status = MagicMock()
+    mock_get.json.return_value = {'markdown': '# Review\nContent'}
+
+    captured_calls = []
+
+    def capture_post(url, **kwargs):
+        captured_calls.append(kwargs.get('json', {}))
+        return _mock_ollama_response('Done.')
+
+    with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research.httpx.get', return_value=mock_get), \
+         patch('routes.research.httpx.post', side_effect=capture_post), \
+         patch('routes.research._build_market_context', return_value=''):
+        client.post('/api/research/review')
+
+    assert captured_calls, 'httpx.post was never called'
+    messages = captured_calls[0].get('messages', [])
+    system_content = next(
+        (m['content'] for m in messages if m.get('role') == 'system'), ''
+    )
+    assert 'REVIEW_MEMORY_SENTINEL' in system_content
+    assert '=== Investor Memory ===' in system_content
