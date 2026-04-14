@@ -14,6 +14,7 @@ llm_bp = Blueprint('llm', __name__)
 
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
 DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
+FAST_MODEL = os.getenv('OLLAMA_FAST_MODEL', 'qwen3.5:latest')
 
 
 def _strip_thinking(content: str) -> str:
@@ -335,14 +336,14 @@ def chat() -> Response:
                 resp = httpx.post(
                     f'{OLLAMA_URL}/api/chat',
                     json={
-                        'model': DEFAULT_MODEL,
+                        'model': DEFAULT_MODEL if think else FAST_MODEL,
                         'messages': loop_messages,
                         'tools': TOOLS,
                         'stream': False,
                         'think': think,
                         'options': {
                             'num_ctx': 8192,
-                            'num_predict': 4096 if think else -1,
+                            'num_predict': 4096 if think else 2048,
                         },
                     },
                     timeout=300.0 if think else 120.0,

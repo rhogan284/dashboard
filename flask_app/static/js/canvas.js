@@ -5,7 +5,7 @@
   let activeSessionId = null;
   let activeCourseId = null;
   let messages = [];
-  let thinkingEnabled = false;
+  let thinkingEnabled = true;
   let timerInterval = null;
 
   // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -456,8 +456,8 @@
   thinkToggleBtn.addEventListener('click', () => {
     thinkingEnabled = !thinkingEnabled;
     thinkToggleBtn.className = thinkingEnabled
-      ? 'px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded-md transition-colors'
-      : 'px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors';
+      ? 'px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors'
+      : 'px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-md transition-colors';
   });
 
   attachToggle.addEventListener('click', () => {

@@ -15,6 +15,7 @@ research_bp = Blueprint('research', __name__)
 
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
 DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
+FAST_MODEL = os.getenv('OLLAMA_FAST_MODEL', 'qwen3.5:latest')
 PORTFOLIO_DB_PATH = os.getenv(
     'PORTFOLIO_DB_PATH',
     '/Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db',
@@ -639,6 +640,9 @@ def chat() -> Response:
         f"Today is {today}. Your local UTC offset is {offset_str}.\n"
         "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
         "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
+        "The === Investor Memory === section below is your persistent memory file about Ryan. "
+        "It is updated automatically after each session. When Ryan asks what you know about him, "
+        "his portfolio, or your context, draw from this section.\n\n"
         f"=== Investor Memory ===\n{memory_text}\n\n"
         f"=== Investment Notes & Theses ===\n{pinboard_text}\n\n"
         f"=== Past Research Summaries ===\n{summaries_text}"
@@ -658,14 +662,14 @@ def chat() -> Response:
                 resp = httpx.post(
                     f'{OLLAMA_URL}/api/chat',
                     json={
-                        'model': DEFAULT_MODEL,
+                        'model': DEFAULT_MODEL if think else FAST_MODEL,
                         'messages': loop_messages,
                         'tools': RESEARCH_TOOLS,
                         'stream': False,
                         'think': think,
                         'options': {
                             'num_ctx': 16384,
-                            'num_predict': 4096 if think else -1,
+                            'num_predict': 4096 if think else 2048,
                         },
                     },
                     timeout=300.0 if think else 120.0,
@@ -778,6 +782,9 @@ def portfolio_review() -> Response:
             f"Today is {today}. Your local UTC offset is {offset_str}.\n"
             "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
             "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
+            "The === Investor Memory === section below is your persistent memory file about Ryan. "
+            "It is updated automatically after each session. When Ryan asks what you know about him, "
+            "his portfolio, or your context, draw from this section.\n\n"
             f"=== Investor Memory ===\n{memory_text}\n\n"
             f"=== Investment Notes & Theses ===\n{pinboard_text}"
         ),

@@ -12,13 +12,13 @@
   let messages = [];
   let timerInterval = null;
   let toolStatus = null;
-  let thinkingEnabled = false;
+  let thinkingEnabled = true;
 
   thinkToggleBtn.addEventListener('click', () => {
     thinkingEnabled = !thinkingEnabled;
     thinkToggleBtn.className = thinkingEnabled
-      ? 'absolute bottom-2 right-2 px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded-md transition-colors'
-      : 'absolute bottom-2 right-2 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors';
+      ? 'absolute bottom-2 right-2 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors'
+      : 'absolute bottom-2 right-2 px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded-md transition-colors';
   });
 
   // ── Rendering ─────────────────────────────────────────────────────

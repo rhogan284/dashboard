@@ -14,7 +14,7 @@ from routes.research import _read_local_file
 canvas_bp = Blueprint('canvas', __name__)
 
 OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'qwen3.5:latest')
+DEFAULT_MODEL = os.getenv('CANVAS_MODEL', 'qwen3.5:latest')
 CANVAS_BASE_URL = os.getenv('CANVAS_BASE_URL', '').rstrip('/')
 CANVAS_KEY = os.getenv('CANVAS_KEY', '')
 
@@ -973,7 +973,7 @@ def chat() -> Response:
                         'think': think,
                         'options': {
                             'num_ctx': 16384,
-                            'num_predict': 4096 if think else -1,
+                            'num_predict': 4096 if think else 2048,
                         },
                     },
                     timeout=300.0 if think else 120.0,
