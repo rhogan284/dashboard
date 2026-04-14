@@ -440,7 +440,8 @@ def test_review_system_prompt_includes_memory(client, tmp_path):
          patch('routes.research.httpx.get', return_value=mock_get), \
          patch('routes.research.httpx.post', side_effect=capture_post), \
          patch('routes.research._build_market_context', return_value=''):
-        client.post('/api/research/review')
+        response = client.post('/api/research/review')
+        _ = response.data  # consume the streaming generator so httpx.post is actually called
 
     assert captured_calls, 'httpx.post was never called'
     messages = captured_calls[0].get('messages', [])

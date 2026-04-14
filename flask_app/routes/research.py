@@ -769,7 +769,6 @@ def portfolio_review() -> Response:
                     content = _strip_thinking(msg.get('content', ''))
                     _save_message(session_id, 'assistant', content)
                     _touch_session(session_id)
-                    yield (json.dumps({'session_id': session_id}) + '\n').encode()
                     yield (json.dumps({'message': {'content': content}}) + '\n').encode()
                     break
 
@@ -798,7 +797,11 @@ def portfolio_review() -> Response:
         except Exception as exc:
             yield (json.dumps({'error': str(exc)}) + '\n').encode()
 
-    return Response(stream_with_context(generate()), mimetype='application/x-ndjson')
+    def generate_with_session_id():
+        yield (json.dumps({'session_id': session_id}) + '\n').encode()
+        yield from generate()
+
+    return Response(stream_with_context(generate_with_session_id()), mimetype='application/x-ndjson')
 
 
 # ---------------------------------------------------------------------------
