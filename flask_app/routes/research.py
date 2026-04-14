@@ -20,6 +20,15 @@ PORTFOLIO_DB_PATH = os.getenv(
     '/Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db',
 )
 
+RESEARCH_MEMORY_PATH = Path(__file__).parent.parent / 'research_memory'
+
+
+def _read_memory() -> str:
+    try:
+        return RESEARCH_MEMORY_PATH.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return ''
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
