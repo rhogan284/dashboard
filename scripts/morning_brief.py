@@ -380,28 +380,27 @@ def search_tavily(client, query: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _call_ollama(prompt: str) -> str:
-    """Make a single non-streaming Ollama call and return the response text."""
-    ollama_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-    model = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
+def _call_omlx(prompt: str) -> str:
+    """Make a single non-streaming oMLX call and return the response text."""
+    omlx_url = os.getenv('OMLX_BASE_URL', 'http://localhost:8002')
+    model = os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit')
+    api_key = os.getenv('OMLX_API_KEY', '')
 
     response = httpx.post(
-        f'{ollama_url}/api/chat',
+        f'{omlx_url}/v1/chat/completions',
+        headers={'Authorization': f'Bearer {api_key}'},
         json={
             'model': model,
             'messages': [{'role': 'user', 'content': prompt}],
-            'stream': False,
-            'think': False,
-            'options': {'num_ctx': 8192},
+            'max_tokens': 4096,
         },
         timeout=300.0,
     )
     response.raise_for_status()
-    raw = response.json()['message']['content'].strip()
+    raw = response.json()['choices'][0]['message']['content'].strip()
 
-    # Strip model thinking blocks (Gemma 4: <|channel>thought\n...<channel|>, Qwen3: <think>...</think>)
+    # Strip Gemma 4 thinking blocks: <|channel>thought\n...<channel|>
     raw = re.sub(r'<\|channel>thought\n.*?<channel\|>', '', raw, flags=re.DOTALL)
-    raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
 
     return raw.strip()
 
@@ -425,7 +424,7 @@ def summarise_gmail(gmail_data: dict) -> str:
         === EMAILS ===
         {format_messages(gmail_data.get('messages', []))}
         """
-    return _call_ollama(prompt)
+    return _call_omlx(prompt)
 
 
 def summarise_markets(search_results: dict, today_str: str) -> str:
@@ -451,7 +450,7 @@ Be concise and scannable. Use data from the search results below.
 === MARKET & NEWS DATA ===
 {format_search_results(search_results)}
 """
-    return _call_ollama(prompt)
+    return _call_omlx(prompt)
 
 
 def build_calendar_md(calendar_data: list) -> str:

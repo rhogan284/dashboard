@@ -8,13 +8,13 @@ from pathlib import Path
 import httpx
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
-from routes.llm import _search_web
+from routes.llm import _search_web, _strip_thinking, OMLX_API_KEY
 from routes.research import _read_local_file
 
 canvas_bp = Blueprint('canvas', __name__)
 
-OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-DEFAULT_MODEL = os.getenv('CANVAS_MODEL', 'qwen3.5:latest')
+OMLX_URL = os.getenv('OMLX_BASE_URL', 'http://localhost:8002')
+OMLX_MODEL = os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit')
 CANVAS_BASE_URL = os.getenv('CANVAS_BASE_URL', '').rstrip('/')
 CANVAS_KEY = os.getenv('CANVAS_KEY', '')
 
@@ -942,8 +942,9 @@ def chat() -> Response:
         except Exception:
             pass
 
+    think_prefix = '<|think|>' if think else ''
     system_content = (
-        f"You are an AI academic tutor for Ryan Hogan.\n"
+        f"{think_prefix}You are an AI academic tutor for Ryan Hogan.\n"
         f"Today is {today}. Your local UTC offset is {offset_str}.\n"
         "You have access to tools to fetch Canvas course data, assignments, grades, and can search the web.\n"
         "Help Ryan with his coursework: explain concepts, review assignment requirements, "
@@ -963,60 +964,121 @@ def chat() -> Response:
 
         try:
             while True:
-                resp = httpx.post(
-                    f'{OLLAMA_URL}/api/chat',
+                think_buf = ''
+                past_thinking = False
+                accumulated_content = ''
+                accumulated_tool_calls = {}
+
+                with httpx.stream(
+                    'POST',
+                    f'{OMLX_URL}/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
                     json={
-                        'model': DEFAULT_MODEL,
+                        'model': OMLX_MODEL,
                         'messages': loop_messages,
                         'tools': CANVAS_TOOLS,
-                        'stream': False,
-                        'think': think,
-                        'options': {
-                            'num_ctx': 16384,
-                            'num_predict': 4096 if think else 2048,
-                        },
+                        'max_tokens': 4096 if think else 2048,
+                        'stream': True,
                     },
                     timeout=300.0 if think else 120.0,
-                )
-                resp.raise_for_status()
+                ) as resp:
+                    resp.raise_for_status()
+                    for raw in resp.iter_lines():
+                        if not raw.startswith('data: '):
+                            continue
+                        payload = raw[6:]
+                        if payload == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
 
-                msg = resp.json()['message']
-                tool_calls = msg.get('tool_calls') or []
+                        delta = chunk['choices'][0].get('delta', {})
 
-                if not tool_calls:
-                    content = msg.get('content', '')
-                    if '<think>' in content:
-                        content = content.split('</think>', 1)[-1].strip()
-                    _save_message(session_id, 'assistant', content)
+                        for tc in (delta.get('tool_calls') or []):
+                            idx = tc['index']
+                            if idx not in accumulated_tool_calls:
+                                accumulated_tool_calls[idx] = {
+                                    'id': '', 'function': {'name': '', 'arguments': ''},
+                                }
+                            if tc.get('id'):
+                                accumulated_tool_calls[idx]['id'] = tc['id']
+                            fn = tc.get('function', {})
+                            accumulated_tool_calls[idx]['function']['name'] += fn.get('name') or ''
+                            accumulated_tool_calls[idx]['function']['arguments'] += fn.get('arguments') or ''
+
+                        content = delta.get('content') or ''
+                        if not content:
+                            continue
+                        if past_thinking:
+                            accumulated_content += content
+                            yield (json.dumps({'chunk': content}) + '\n').encode()
+                        else:
+                            think_buf += content
+                            if '<channel|>' in think_buf:
+                                past_thinking = True
+                                after = think_buf.split('<channel|>', 1)[1]
+                                think_buf = ''
+                                if after:
+                                    accumulated_content += after
+                                    yield (json.dumps({'chunk': after}) + '\n').encode()
+                            elif len(think_buf) > 30 and not think_buf.startswith('<|channel>'):
+                                past_thinking = True
+                                accumulated_content += think_buf
+                                yield (json.dumps({'chunk': think_buf}) + '\n').encode()
+                                think_buf = ''
+
+                if accumulated_tool_calls:
+                    tool_calls_list = [
+                        {
+                            'id': tc['id'],
+                            'type': 'function',
+                            'function': {
+                                'name': tc['function']['name'],
+                                'arguments': tc['function']['arguments'],
+                            },
+                        }
+                        for tc in accumulated_tool_calls.values()
+                    ]
+                    loop_messages.append({
+                        'role': 'assistant',
+                        'content': None,
+                        'tool_calls': tool_calls_list,
+                    })
+
+                    for tc in tool_calls_list:
+                        fn = tc['function']
+                        name = fn['name']
+                        args = fn['arguments']
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
+
+                        label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
+                        yield (json.dumps({'status': label}) + '\n').encode()
+
+                        handler = _CANVAS_TOOL_HANDLERS.get(name)
+                        result = handler(args) if handler else f'Unknown tool: {name}'
+
+                        tool_content = result if isinstance(result, str) else json.dumps(result)
+                        _save_message(session_id, 'tool', tool_content)
+                        loop_messages.append({
+                            'role': 'tool',
+                            'tool_call_id': tc['id'],
+                            'content': tool_content,
+                        })
+                else:
+                    _save_message(session_id, 'assistant', accumulated_content)
                     _touch_session(session_id)
-                    yield (json.dumps({'message': {'content': content}}) + '\n').encode()
                     break
 
-                loop_messages.append(msg)
-
-                for tc in tool_calls:
-                    fn = tc.get('function', {})
-                    name = fn.get('name', '')
-                    args = fn.get('arguments', {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-
-                    label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
-                    yield (json.dumps({'status': label}) + '\n').encode()
-
-                    handler = _CANVAS_TOOL_HANDLERS.get(name)
-                    result = handler(args) if handler else f'Unknown tool: {name}'
-
-                    _save_message(session_id, 'tool', result if isinstance(result, str) else json.dumps(result))
-                    loop_messages.append({'role': 'tool', 'content': result if isinstance(result, str) else json.dumps(result)})
-
         except httpx.ConnectError:
-            yield b'{"error": "Cannot connect to Ollama. Is it running?"}\n'
+            yield b'{"error": "Cannot connect to oMLX. Is it running?"}\n'
         except httpx.HTTPStatusError as exc:
-            yield (json.dumps({'error': f'Ollama error: {exc.response.status_code}'}) + '\n').encode()
+            yield (json.dumps({'error': f'oMLX error: {exc.response.status_code}'}) + '\n').encode()
         except Exception as exc:
             yield (json.dumps({'error': str(exc)}) + '\n').encode()
 
@@ -1047,19 +1109,17 @@ def summarise_session(session_id: int) -> Response:
 
     try:
         resp = httpx.post(
-            f'{OLLAMA_URL}/api/chat',
+            f'{OMLX_URL}/v1/chat/completions',
+            headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
             json={
-                'model': DEFAULT_MODEL,
+                'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
-                'stream': False,
-                'options': {'num_ctx': 8192, 'num_predict': 512},
+                'max_tokens': 512,
             },
             timeout=120.0,
         )
         resp.raise_for_status()
-        summary = resp.json()['message'].get('content', '').strip()
-        if '<think>' in summary:
-            summary = summary.split('</think>', 1)[-1].strip()
+        summary = _strip_thinking(resp.json()['choices'][0]['message'].get('content', ''))
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 
@@ -1093,20 +1153,17 @@ def get_session_title(session_id: int) -> Response:
 
     try:
         resp = httpx.post(
-            f'{OLLAMA_URL}/api/chat',
+            f'{OMLX_URL}/v1/chat/completions',
+            headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
             json={
-                'model': DEFAULT_MODEL,
+                'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
-                'stream': False,
-                'options': {'num_ctx': 4096, 'num_predict': 32},
+                'max_tokens': 32,
             },
             timeout=60.0,
         )
         resp.raise_for_status()
-        title = resp.json()['message'].get('content', '').strip()
-        if '<think>' in title:
-            title = title.split('</think>', 1)[-1].strip()
-        title = title[:100]
+        title = _strip_thinking(resp.json()['choices'][0]['message'].get('content', ''))[:100]
     except Exception:
         return jsonify({'title': 'Tutoring session'})
 

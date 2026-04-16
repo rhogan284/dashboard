@@ -66,8 +66,8 @@ Copy `.env.example` to `.env` (or create `.env` in the project root):
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
 GOOGLE_API_KEY=your_google_api_key
 TAVILY_API_KEY=your_tavily_api_key
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen3.5:latest
+OMLX_BASE_URL=http://localhost:8000
+OMLX_MODEL=gemma-4-26b-a4b-it-4bit
 
 # Optional: Investment Research
 PORTFOLIO_DB_PATH=/path/to/portfolio.db

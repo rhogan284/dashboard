@@ -21,6 +21,16 @@
     <span class="font-semibold text-lg tracking-tight">Dashboard</span>
     <nav class="flex gap-1 items-center">
       <a href="/" class="text-sm px-3 py-1.5 rounded-md bg-gray-700 text-white">Home</a>
+      <!-- Background task status indicator -->
+      <div class="relative" id="bg-status-container">
+        <button id="bg-status-btn" class="flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-700 transition-colors">
+          <span id="bg-status-dot" class="w-2.5 h-2.5 rounded-full bg-green-500 transition-colors duration-300"></span>
+        </button>
+        <div id="bg-status-tooltip" class="hidden absolute right-0 top-full mt-1 w-56 bg-gray-900 border border-gray-700 rounded-xl shadow-xl z-50 p-3">
+          <p class="text-xs font-medium text-gray-300 mb-1">Background Status</p>
+          <p id="bg-status-label" class="text-xs text-gray-400">Model ready</p>
+        </div>
+      </div>
       <div class="relative" id="settings-container">
         <button id="settings-btn" class="text-sm px-3 py-1.5 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 transition-colors" title="Settings">⚙</button>
         <div id="settings-dropdown" class="hidden absolute right-0 top-full mt-1 w-72 bg-gray-900 border border-gray-700 rounded-xl shadow-xl z-50 p-3 flex flex-col gap-1">
@@ -438,5 +448,47 @@
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/research.js"></script>
   <script src="/static/js/canvas.js"></script>
+  <script>
+    // ── Background task status indicator ──────────────────────────────────────
+    (function () {
+      const dot     = document.getElementById('bg-status-dot');
+      const tooltip = document.getElementById('bg-status-tooltip');
+      const label   = document.getElementById('bg-status-label');
+      const btn     = document.getElementById('bg-status-btn');
+
+      const COLOR = {
+        idle:    'bg-green-500',
+        queued:  'bg-amber-400',
+        running: 'bg-red-500',
+      };
+
+      let currentState = 'idle';
+
+      function applyState(state, task) {
+        if (state === currentState) { label.textContent = task; return; }
+        currentState = state;
+        dot.className = 'w-2.5 h-2.5 rounded-full transition-colors duration-300 '
+          + (COLOR[state] || COLOR.idle)
+          + (state === 'running' ? ' animate-pulse' : '');
+        label.textContent = task;
+      }
+
+      async function poll() {
+        try {
+          const r = await fetch('/api/research/bg-status');
+          if (r.ok) {
+            const d = await r.json();
+            applyState(d.state, d.task);
+          }
+        } catch (_) {}
+      }
+
+      btn.addEventListener('mouseenter', () => tooltip.classList.remove('hidden'));
+      btn.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
+
+      poll();
+      setInterval(poll, 2000);
+    })();
+  </script>
 </body>
 </html>

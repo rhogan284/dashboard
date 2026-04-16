@@ -1,9 +1,30 @@
 import os
+import threading
 from pathlib import Path
 from flask import Flask, render_template
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / '.env')
+
+
+def _preload_omlx():
+    """Send a 1-token request on startup so the model is loaded before the first real request."""
+    import time
+    import httpx
+    time.sleep(3)
+    try:
+        httpx.post(
+            f"{os.getenv('OMLX_BASE_URL', 'http://localhost:8002')}/v1/chat/completions",
+            headers={'Authorization': f"Bearer {os.getenv('OMLX_API_KEY', '')}"},
+            json={
+                'model': os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit'),
+                'messages': [{'role': 'user', 'content': 'hi'}],
+                'max_tokens': 1,
+            },
+            timeout=120.0,
+        )
+    except Exception:
+        pass
 
 
 def create_app(config: dict | None = None) -> Flask:
@@ -33,6 +54,9 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(research_bp)
     app.register_blueprint(canvas_bp)
     app.register_blueprint(weather_bp)
+
+    if not app.config.get('TESTING'):
+        threading.Thread(target=_preload_omlx, daemon=True).start()
 
     @app.route('/')
     def index():

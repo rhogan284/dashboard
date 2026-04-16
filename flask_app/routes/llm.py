@@ -12,21 +12,17 @@ from flask import Blueprint, Response, current_app, request, stream_with_context
 
 llm_bp = Blueprint('llm', __name__)
 
-OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
-FAST_MODEL = os.getenv('OLLAMA_FAST_MODEL', 'qwen3.5:latest')
+OMLX_URL = os.getenv('OMLX_BASE_URL', 'http://localhost:8002')
+OMLX_MODEL = os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit')
+OMLX_API_KEY = os.getenv('OMLX_API_KEY', '')
 
 
 def _strip_thinking(content: str) -> str:
-    """Strip model thinking/reasoning blocks from response content.
+    """Strip Gemma 4 thinking blocks from response content.
 
-    Handles both Qwen3-style <think>...</think> and Gemma 4-style
-    <|channel>thought\\n...<channel|> blocks.
+    Gemma 4 wraps reasoning in <|channel>thought\\n...<channel|> blocks.
     """
-    # Gemma 4: <|channel>thought\n...<channel|>
     content = re.sub(r'<\|channel>thought\n.*?<channel\|>', '', content, flags=re.DOTALL)
-    # Qwen3 / legacy: <think>...</think>
-    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
     return content.strip()
 
 # ---------------------------------------------------------------------------
@@ -318,10 +314,12 @@ def chat() -> Response:
     utc_offset = datetime.now().astimezone().strftime('%z')
     offset_str = f"{utc_offset[:3]}:{utc_offset[3:]}"  # e.g. +10:00
 
+    # Gemma 4 thinking is enabled by prefixing the system prompt with <|think|>.
+    think_prefix = '<|think|>' if think else ''
     system_msg = {
         'role': 'system',
         'content': (
-            f"You are a helpful personal assistant. Today is {today}. "
+            f"{think_prefix}You are a helpful personal assistant. Today is {today}. "
             f"The user's local UTC offset is {offset_str} — use this when creating calendar events. "
             "You have access to the user's Google Calendar and Gmail via tools. "
             "Use tools whenever the user asks you to search the web, check/create/delete calendar events, "
@@ -333,57 +331,120 @@ def chat() -> Response:
         loop_messages = [system_msg] + list(messages)
         try:
             while True:
-                resp = httpx.post(
-                    f'{OLLAMA_URL}/api/chat',
+                think_buf = ''
+                past_thinking = False
+                accumulated_content = ''
+                accumulated_tool_calls = {}  # index -> {id, function: {name, arguments}}
+
+                with httpx.stream(
+                    'POST',
+                    f'{OMLX_URL}/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
                     json={
-                        'model': DEFAULT_MODEL if think else FAST_MODEL,
+                        'model': OMLX_MODEL,
                         'messages': loop_messages,
                         'tools': TOOLS,
-                        'stream': False,
-                        'think': think,
-                        'options': {
-                            'num_ctx': 8192,
-                            'num_predict': 4096 if think else 2048,
-                        },
+                        'max_tokens': 4096 if think else 2048,
+                        'stream': True,
                     },
                     timeout=300.0 if think else 120.0,
-                )
-                resp.raise_for_status()
+                ) as resp:
+                    resp.raise_for_status()
+                    for raw in resp.iter_lines():
+                        if not raw.startswith('data: '):
+                            continue
+                        payload = raw[6:]
+                        if payload == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
 
-                msg = resp.json()['message']
-                tool_calls = msg.get('tool_calls') or []
+                        delta = chunk['choices'][0].get('delta', {})
 
-                if not tool_calls:
-                    content = _strip_thinking(msg.get('content', ''))
-                    yield (json.dumps({'message': {'content': content}}) + '\n').encode()
+                        # Accumulate tool-call fragments (streamed in pieces)
+                        for tc in (delta.get('tool_calls') or []):
+                            idx = tc['index']
+                            if idx not in accumulated_tool_calls:
+                                accumulated_tool_calls[idx] = {
+                                    'id': '', 'function': {'name': '', 'arguments': ''},
+                                }
+                            if tc.get('id'):
+                                accumulated_tool_calls[idx]['id'] = tc['id']
+                            fn = tc.get('function', {})
+                            accumulated_tool_calls[idx]['function']['name'] += fn.get('name') or ''
+                            accumulated_tool_calls[idx]['function']['arguments'] += fn.get('arguments') or ''
+
+                        # Stream content, stripping the Gemma 4 <|channel>thought…<channel|> block
+                        content = delta.get('content') or ''
+                        if not content:
+                            continue
+                        if past_thinking:
+                            accumulated_content += content
+                            yield (json.dumps({'chunk': content}) + '\n').encode()
+                        else:
+                            think_buf += content
+                            if '<channel|>' in think_buf:
+                                past_thinking = True
+                                after = think_buf.split('<channel|>', 1)[1]
+                                think_buf = ''
+                                if after:
+                                    accumulated_content += after
+                                    yield (json.dumps({'chunk': after}) + '\n').encode()
+                            elif len(think_buf) > 30 and not think_buf.startswith('<|channel>'):
+                                # No thinking-block prefix — stream directly
+                                past_thinking = True
+                                accumulated_content += think_buf
+                                yield (json.dumps({'chunk': think_buf}) + '\n').encode()
+                                think_buf = ''
+
+                if accumulated_tool_calls:
+                    tool_calls_list = [
+                        {
+                            'id': tc['id'],
+                            'type': 'function',
+                            'function': {
+                                'name': tc['function']['name'],
+                                'arguments': tc['function']['arguments'],
+                            },
+                        }
+                        for tc in accumulated_tool_calls.values()
+                    ]
+                    loop_messages.append({
+                        'role': 'assistant',
+                        'content': None,
+                        'tool_calls': tool_calls_list,
+                    })
+
+                    for tc in tool_calls_list:
+                        fn = tc['function']
+                        name = fn['name']
+                        args = fn['arguments']
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
+
+                        label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
+                        yield (json.dumps({'status': label}) + '\n').encode()
+
+                        handler = _TOOL_HANDLERS.get(name)
+                        result = handler(args) if handler else f'Unknown tool: {name}'
+
+                        loop_messages.append({
+                            'role': 'tool',
+                            'tool_call_id': tc['id'],
+                            'content': result,
+                        })
+                else:
                     break
 
-                # Append the assistant's tool-call message to history
-                loop_messages.append(msg)
-
-                for tc in tool_calls:
-                    fn = tc.get('function', {})
-                    name = fn.get('name', '')
-                    args = fn.get('arguments', {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-
-                    # Stream status so the UI can show what's happening
-                    label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
-                    yield (json.dumps({'status': label}) + '\n').encode()
-
-                    handler = _TOOL_HANDLERS.get(name)
-                    result = handler(args) if handler else f'Unknown tool: {name}'
-
-                    loop_messages.append({'role': 'tool', 'content': result})
-
         except httpx.ConnectError:
-            yield b'{"error": "Cannot connect to Ollama. Is it running?"}\n'
+            yield b'{"error": "Cannot connect to oMLX. Is it running?"}\n'
         except httpx.HTTPStatusError as exc:
-            yield (json.dumps({'error': f'Ollama error: {exc.response.status_code}'}) + '\n').encode()
+            yield (json.dumps({'error': f'oMLX error: {exc.response.status_code}'}) + '\n').encode()
         except Exception as exc:
             yield (json.dumps({'error': str(exc)}) + '\n').encode()
 
