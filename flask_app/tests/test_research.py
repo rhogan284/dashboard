@@ -200,16 +200,49 @@ def test_build_market_context_handles_yfinance_failure():
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
+import json as _json
 from unittest.mock import MagicMock, patch
 
 
-def _mock_ollama_response(content='Test response'):
+def _mock_omlx_response(content='Test response'):
+    """Non-streaming mock for background tasks (summarise, title, _update_memory)."""
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {
-        'message': {'role': 'assistant', 'content': content, 'tool_calls': None}
+        'choices': [{'message': {'role': 'assistant', 'content': content, 'tool_calls': None}}]
     }
     return mock_resp
+
+
+class _SyncThread:
+    """Drop-in for threading.Thread that runs target() inline (no delay, no new thread)."""
+    def __init__(self, target, daemon=None):
+        self._target = target
+    def start(self):
+        self._target()
+
+
+def _mock_omlx_stream(content='Test response'):
+    """Streaming context-manager mock for chat routes (httpx.stream)."""
+    # Simulate Gemma4 output: empty thinking block + content in one SSE chunk
+    gemma_output = f'<|channel>thought\n<channel|>{content}'
+    sse_data = _json.dumps({
+        'choices': [{'delta': {'content': gemma_output}, 'finish_reason': None}]
+    })
+    sse_lines = [f'data: {sse_data}', 'data: [DONE]']
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.iter_lines.side_effect = lambda: iter(sse_lines)
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__ = MagicMock(return_value=mock_resp)
+    mock_ctx.__exit__ = MagicMock(return_value=False)
+    return mock_ctx
+
+
+# Backwards-compatible alias used throughout the tests
+_mock_ollama_response = _mock_omlx_response
 
 
 def test_chat_requires_session_id_and_messages(client):
@@ -219,7 +252,7 @@ def test_chat_requires_session_id_and_messages(client):
 
 def test_chat_streams_ndjson(client):
     session_id = client.post('/api/research/sessions').get_json()['id']
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('Hello!')):
+    with patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('Hello!')):
         response = client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Hi'}],
@@ -229,19 +262,19 @@ def test_chat_streams_ndjson(client):
     assert response.content_type == 'application/x-ndjson'
     lines = [l for l in response.data.decode().strip().split('\n') if l]
     assert len(lines) >= 1
-    import json as _json
-    data = _json.loads(lines[-1])
-    assert 'message' in data
-    assert data['message']['content'] == 'Hello!'
+    all_data = [_json.loads(l) for l in lines]
+    accumulated = ''.join(d['chunk'] for d in all_data if 'chunk' in d)
+    assert accumulated == 'Hello!'
 
 
 def test_chat_persists_messages_to_db(client):
     session_id = client.post('/api/research/sessions').get_json()['id']
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('World!')):
-        client.post('/api/research/chat', json={
+    with patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('World!')):
+        resp = client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Hello'}],
         })
+        _ = resp.data  # consume generator so _save_message runs
     session = client.get(f'/api/research/sessions/{session_id}').get_json()
     roles = [m['role'] for m in session['messages']]
     assert 'user' in roles
@@ -266,9 +299,8 @@ def test_review_creates_session_and_streams_response(client):
     mock_get.raise_for_status = MagicMock()
     mock_get.json.return_value = {'markdown': '# Portfolio Review\nTest content'}
 
-    import json as _json
     with patch('routes.research.httpx.get', return_value=mock_get), \
-         patch('routes.research.httpx.post', return_value=_mock_ollama_response('Here are my recommendations.')), \
+         patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('Here are my recommendations.')), \
          patch('routes.research._build_market_context', return_value='## Market Context\n- VIX: 18\n'):
         response = client.post('/api/research/review')
         body = response.data
@@ -278,9 +310,9 @@ def test_review_creates_session_and_streams_response(client):
     lines = [l for l in body.decode().strip().split('\n') if l]
     first = _json.loads(lines[0])
     assert 'session_id' in first
-    last = _json.loads(lines[-1])
-    assert 'message' in last
-    assert 'recommendations' in last['message']['content'].lower()
+    all_data = [_json.loads(l) for l in lines]
+    accumulated = ''.join(d['chunk'] for d in all_data if 'chunk' in d)
+    assert 'recommendations' in accumulated.lower()
 
 
 def test_review_persists_user_and_assistant_messages(client):
@@ -288,9 +320,8 @@ def test_review_persists_user_and_assistant_messages(client):
     mock_get.raise_for_status = MagicMock()
     mock_get.json.return_value = {'markdown': '# Review\nContent'}
 
-    import json as _json
     with patch('routes.research.httpx.get', return_value=mock_get), \
-         patch('routes.research.httpx.post', return_value=_mock_ollama_response('Analysis complete.')), \
+         patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('Analysis complete.')), \
          patch('routes.research._build_market_context', return_value=''):
         response = client.post('/api/research/review')
         body = response.data
@@ -309,9 +340,8 @@ def test_review_session_title_is_portfolio_review(client):
     mock_get.raise_for_status = MagicMock()
     mock_get.json.return_value = {'markdown': '# Review'}
 
-    import json as _json
     with patch('routes.research.httpx.get', return_value=mock_get), \
-         patch('routes.research.httpx.post', return_value=_mock_ollama_response('Done.')), \
+         patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('Done.')), \
          patch('routes.research._build_market_context', return_value=''):
         response = client.post('/api/research/review')
         body = response.data
@@ -340,7 +370,7 @@ def test_summarise_session_calls_ollama_and_saves(client, tmp_path):
     mem_file = tmp_path / 'research_memory'
     mem_file.write_text('', encoding='utf-8')
     session_id = client.post('/api/research/sessions').get_json()['id']
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('Response text')):
+    with patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('Response text')):
         client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Analyse AAPL'}],
@@ -365,7 +395,7 @@ def test_get_title_returns_new_session_for_empty(client):
 
 def test_get_title_calls_ollama_and_saves(client):
     session_id = client.post('/api/research/sessions').get_json()['id']
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('AAPL earnings analysis')):
+    with patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('AAPL earnings analysis')):
         client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'What are AAPL earnings?'}],
@@ -405,18 +435,18 @@ def test_chat_system_prompt_includes_memory(client, tmp_path):
 
     captured_calls = []
 
-    def capture_post(url, **kwargs):
+    def capture_stream(method, url, **kwargs):
         captured_calls.append(kwargs.get('json', {}))
-        return _mock_ollama_response('ok')
+        return _mock_omlx_stream('ok')
 
     with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
-         patch('routes.research.httpx.post', side_effect=capture_post):
+         patch('routes.research.httpx.stream', side_effect=capture_stream):
         client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Hi'}],
         })
 
-    assert captured_calls, 'httpx.post was never called'
+    assert captured_calls, 'httpx.stream was never called'
     messages = captured_calls[0].get('messages', [])
     system_content = next(
         (m['content'] for m in messages if m.get('role') == 'system'), ''
@@ -435,18 +465,18 @@ def test_review_system_prompt_includes_memory(client, tmp_path):
 
     captured_calls = []
 
-    def capture_post(url, **kwargs):
+    def capture_stream(method, url, **kwargs):
         captured_calls.append(kwargs.get('json', {}))
-        return _mock_ollama_response('Done.')
+        return _mock_omlx_stream('Done.')
 
     with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
          patch('routes.research.httpx.get', return_value=mock_get), \
-         patch('routes.research.httpx.post', side_effect=capture_post), \
+         patch('routes.research.httpx.stream', side_effect=capture_stream), \
          patch('routes.research._build_market_context', return_value=''):
         response = client.post('/api/research/review')
-        _ = response.data  # consume the streaming generator so httpx.post is actually called
+        _ = response.data  # consume the streaming generator so httpx.stream is actually called
 
-    assert captured_calls, 'httpx.post was never called'
+    assert captured_calls, 'httpx.stream was never called'
     messages = captured_calls[0].get('messages', [])
     system_content = next(
         (m['content'] for m in messages if m.get('role') == 'system'), ''
@@ -467,13 +497,15 @@ def test_summarise_updates_memory_file(client, tmp_path):
     summary_response = _mock_ollama_response('Summary of session.')
     memory_response = _mock_ollama_response('Updated memory content.')
 
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('chat reply')):
+    with patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('chat reply')):
         client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Analyse CRDO'}],
         })
 
     with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research._MEMORY_UPDATE_DELAY_SECS', 0), \
+         patch('routes.research.threading.Thread', _SyncThread), \
          patch('routes.research.httpx.post', side_effect=[summary_response, memory_response]):
         response = client.post(f'/api/research/sessions/{session_id}/summarise')
 
@@ -490,7 +522,7 @@ def test_summarise_skips_memory_write_on_empty_response(client, tmp_path):
 
     session_id = client.post('/api/research/sessions').get_json()['id']
 
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('chat reply')):
+    with patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('chat reply')):
         client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Quick check'}],
@@ -500,6 +532,8 @@ def test_summarise_skips_memory_write_on_empty_response(client, tmp_path):
     empty_memory_response = _mock_ollama_response('')  # empty — should not write
 
     with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research._MEMORY_UPDATE_DELAY_SECS', 0), \
+         patch('routes.research.threading.Thread', _SyncThread), \
          patch('routes.research.httpx.post', side_effect=[summary_response, empty_memory_response]):
         client.post(f'/api/research/sessions/{session_id}/summarise')
 
@@ -513,7 +547,7 @@ def test_summarise_memory_failure_does_not_affect_summary_response(client, tmp_p
 
     session_id = client.post('/api/research/sessions').get_json()['id']
 
-    with patch('routes.research.httpx.post', return_value=_mock_ollama_response('chat reply')):
+    with patch('routes.research.httpx.stream', return_value=_mock_omlx_stream('chat reply')):
         client.post('/api/research/chat', json={
             'session_id': session_id,
             'messages': [{'role': 'user', 'content': 'Something'}],
@@ -522,6 +556,8 @@ def test_summarise_memory_failure_does_not_affect_summary_response(client, tmp_p
     summary_response = _mock_ollama_response('Good summary.')
 
     with patch('routes.research.RESEARCH_MEMORY_PATH', new=mem_file), \
+         patch('routes.research._MEMORY_UPDATE_DELAY_SECS', 0), \
+         patch('routes.research.threading.Thread', _SyncThread), \
          patch('routes.research.httpx.post', side_effect=[summary_response, Exception('Ollama exploded')]):
         response = client.post(f'/api/research/sessions/{session_id}/summarise')
 

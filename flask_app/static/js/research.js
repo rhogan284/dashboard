@@ -404,7 +404,7 @@
               activeSessionId = data.session_id;
             }
             if (data.status) { toolStatus = data.status; logActivity(data.status); }
-            const token = data.message?.content;
+            const token = data.chunk ?? data.message?.content;
             if (token) {
               assistantContent += token;
               streamBubble.innerHTML = marked.parse(assistantContent);
@@ -507,7 +507,7 @@
             const data = JSON.parse(line);
             if (data.error) throw new Error(data.error);
             if (data.status) { toolStatus = data.status; logActivity(data.status); }
-            const token = data.message?.content;
+            const token = data.chunk ?? data.message?.content;
             if (token) {
               assistantContent += token;
               streamBubble.innerHTML = marked.parse(assistantContent);

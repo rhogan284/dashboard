@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,13 +10,12 @@ import httpx
 # Response, stream_with_context, jsonify, request are used by route handlers added in later tasks
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
-from routes.llm import _search_web, _strip_thinking
+from routes.llm import _search_web, _strip_thinking, OMLX_API_KEY
 
 research_bp = Blueprint('research', __name__)
 
-OLLAMA_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-DEFAULT_MODEL = os.getenv('OLLAMA_MODEL', 'gemma4:26b')
-FAST_MODEL = os.getenv('OLLAMA_FAST_MODEL', 'qwen3.5:latest')
+OMLX_URL = os.getenv('OMLX_BASE_URL', 'http://localhost:8002')
+OMLX_MODEL = os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit')
 PORTFOLIO_DB_PATH = os.getenv(
     'PORTFOLIO_DB_PATH',
     '/Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db',
@@ -23,6 +23,19 @@ PORTFOLIO_DB_PATH = os.getenv(
 
 RESEARCH_MEMORY_PATH = Path(__file__).parent.parent / 'research_memory'
 _MEMORY_TRANSCRIPT_LIMIT = 8000
+_MEMORY_UPDATE_DELAY_SECS = 15  # seconds to wait before firing _update_memory (avoids GPU contention)
+
+# ---------------------------------------------------------------------------
+# Background task status (thread-safe, polled by the UI)
+# ---------------------------------------------------------------------------
+_bg_lock = threading.Lock()
+_bg_status_state: dict = {'state': 'idle', 'task': 'Model ready'}
+
+
+def _set_bg_status(state: str, task: str) -> None:
+    with _bg_lock:
+        _bg_status_state['state'] = state
+        _bg_status_state['task'] = task
 
 
 def _read_memory() -> str:
@@ -49,17 +62,17 @@ def _update_memory(transcript: str) -> None:
     )
     try:
         resp = httpx.post(
-            f'{OLLAMA_URL}/api/chat',
+            f'{OMLX_URL}/v1/chat/completions',
+            headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
             json={
-                'model': DEFAULT_MODEL,
+                'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
-                'stream': False,
-                'options': {'num_ctx': 16384, 'num_predict': 4096},
+                'max_tokens': 4096,
             },
             timeout=300.0,
         )
         resp.raise_for_status()
-        updated = _strip_thinking(resp.json()['message'].get('content', '')).strip()
+        updated = _strip_thinking(resp.json()['choices'][0]['message'].get('content', '')).strip()
         if not updated:
             return
         tmp = RESEARCH_MEMORY_PATH.with_suffix('.tmp')
@@ -124,6 +137,16 @@ def _init_db():
 def _on_registered(state):
     with state.app.app_context():
         _init_db()
+
+
+# ---------------------------------------------------------------------------
+# Background status route
+# ---------------------------------------------------------------------------
+
+@research_bp.route('/api/research/bg-status')
+def bg_status():
+    with _bg_lock:
+        return jsonify(dict(_bg_status_state))
 
 
 # ---------------------------------------------------------------------------
@@ -635,8 +658,9 @@ def chat() -> Response:
 
     memory_text = _read_memory()
 
+    think_prefix = '<|think|>' if think else ''
     system_content = (
-        f"You are an investment research assistant for Ryan Hogan.\n"
+        f"{think_prefix}You are an investment research assistant for Ryan Hogan.\n"
         f"Today is {today}. Your local UTC offset is {offset_str}.\n"
         "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
         "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
@@ -659,58 +683,120 @@ def chat() -> Response:
 
         try:
             while True:
-                resp = httpx.post(
-                    f'{OLLAMA_URL}/api/chat',
+                think_buf = ''
+                past_thinking = False
+                accumulated_content = ''
+                accumulated_tool_calls = {}
+
+                with httpx.stream(
+                    'POST',
+                    f'{OMLX_URL}/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
                     json={
-                        'model': DEFAULT_MODEL if think else FAST_MODEL,
+                        'model': OMLX_MODEL,
                         'messages': loop_messages,
                         'tools': RESEARCH_TOOLS,
-                        'stream': False,
-                        'think': think,
-                        'options': {
-                            'num_ctx': 16384,
-                            'num_predict': 4096 if think else 2048,
-                        },
+                        'max_tokens': 4096 if think else 2048,
+                        'stream': True,
                     },
                     timeout=300.0 if think else 120.0,
-                )
-                resp.raise_for_status()
+                ) as resp:
+                    resp.raise_for_status()
+                    for raw in resp.iter_lines():
+                        if not raw.startswith('data: '):
+                            continue
+                        payload = raw[6:]
+                        if payload == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
 
-                msg = resp.json()['message']
-                tool_calls = msg.get('tool_calls') or []
+                        delta = chunk['choices'][0].get('delta', {})
 
-                if not tool_calls:
-                    content = _strip_thinking(msg.get('content', ''))
-                    _save_message(session_id, 'assistant', content)
+                        for tc in (delta.get('tool_calls') or []):
+                            idx = tc['index']
+                            if idx not in accumulated_tool_calls:
+                                accumulated_tool_calls[idx] = {
+                                    'id': '', 'function': {'name': '', 'arguments': ''},
+                                }
+                            if tc.get('id'):
+                                accumulated_tool_calls[idx]['id'] = tc['id']
+                            fn = tc.get('function', {})
+                            accumulated_tool_calls[idx]['function']['name'] += fn.get('name') or ''
+                            accumulated_tool_calls[idx]['function']['arguments'] += fn.get('arguments') or ''
+
+                        content = delta.get('content') or ''
+                        if not content:
+                            continue
+                        if past_thinking:
+                            accumulated_content += content
+                            yield (json.dumps({'chunk': content}) + '\n').encode()
+                        else:
+                            think_buf += content
+                            if '<channel|>' in think_buf:
+                                past_thinking = True
+                                after = think_buf.split('<channel|>', 1)[1]
+                                think_buf = ''
+                                if after:
+                                    accumulated_content += after
+                                    yield (json.dumps({'chunk': after}) + '\n').encode()
+                            elif len(think_buf) > 30 and not think_buf.startswith('<|channel>'):
+                                past_thinking = True
+                                accumulated_content += think_buf
+                                yield (json.dumps({'chunk': think_buf}) + '\n').encode()
+                                think_buf = ''
+
+                if accumulated_tool_calls:
+                    tool_calls_list = [
+                        {
+                            'id': tc['id'],
+                            'type': 'function',
+                            'function': {
+                                'name': tc['function']['name'],
+                                'arguments': tc['function']['arguments'],
+                            },
+                        }
+                        for tc in accumulated_tool_calls.values()
+                    ]
+                    loop_messages.append({
+                        'role': 'assistant',
+                        'content': None,
+                        'tool_calls': tool_calls_list,
+                    })
+
+                    for tc in tool_calls_list:
+                        fn = tc['function']
+                        name = fn['name']
+                        args = fn['arguments']
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
+
+                        label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
+                        yield (json.dumps({'status': label}) + '\n').encode()
+
+                        handler = _RESEARCH_TOOL_HANDLERS.get(name)
+                        result = handler(args) if handler else f'Unknown tool: {name}'
+
+                        _save_message(session_id, 'tool', result)
+                        loop_messages.append({
+                            'role': 'tool',
+                            'tool_call_id': tc['id'],
+                            'content': result,
+                        })
+                else:
+                    _save_message(session_id, 'assistant', accumulated_content)
                     _touch_session(session_id)
-                    yield (json.dumps({'message': {'content': content}}) + '\n').encode()
                     break
 
-                loop_messages.append(msg)
-
-                for tc in tool_calls:
-                    fn = tc.get('function', {})
-                    name = fn.get('name', '')
-                    args = fn.get('arguments', {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-
-                    label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
-                    yield (json.dumps({'status': label}) + '\n').encode()
-
-                    handler = _RESEARCH_TOOL_HANDLERS.get(name)
-                    result = handler(args) if handler else f'Unknown tool: {name}'
-
-                    _save_message(session_id, 'tool', result)
-                    loop_messages.append({'role': 'tool', 'content': result})
-
         except httpx.ConnectError:
-            yield b'{"error": "Cannot connect to Ollama. Is it running?"}\n'
+            yield b'{"error": "Cannot connect to oMLX. Is it running?"}\n'
         except httpx.HTTPStatusError as exc:
-            yield (json.dumps({'error': f'Ollama error: {exc.response.status_code}'}) + '\n').encode()
+            yield (json.dumps({'error': f'oMLX error: {exc.response.status_code}'}) + '\n').encode()
         except Exception as exc:
             yield (json.dumps({'error': str(exc)}) + '\n').encode()
 
@@ -778,7 +864,7 @@ def portfolio_review() -> Response:
     system_msg = {
         'role': 'system',
         'content': (
-            f"You are an investment research assistant for Ryan Hogan.\n"
+            f"<|think|>You are an investment research assistant for Ryan Hogan.\n"
             f"Today is {today}. Your local UTC offset is {offset_str}.\n"
             "You have access to tools for web search, financial data, news, portfolio data, and local files.\n"
             "Be concise, cite your sources, and flag uncertainty clearly.\n\n"
@@ -794,52 +880,117 @@ def portfolio_review() -> Response:
         loop_messages = [system_msg, {'role': 'user', 'content': full_prompt}]
         try:
             while True:
-                resp = httpx.post(
-                    f'{OLLAMA_URL}/api/chat',
+                think_buf = ''
+                past_thinking = False
+                accumulated_content = ''
+                accumulated_tool_calls = {}
+
+                with httpx.stream(
+                    'POST',
+                    f'{OMLX_URL}/v1/chat/completions',
+                    headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
                     json={
-                        'model': DEFAULT_MODEL,
+                        'model': OMLX_MODEL,
                         'messages': loop_messages,
                         'tools': RESEARCH_TOOLS,
-                        'stream': False,
-                        'think': True,
-                        'options': {'num_ctx': 16384, 'num_predict': 4096},
+                        'max_tokens': 4096,
+                        'stream': True,
                     },
                     timeout=300.0,
-                )
-                resp.raise_for_status()
+                ) as resp:
+                    resp.raise_for_status()
+                    for raw in resp.iter_lines():
+                        if not raw.startswith('data: '):
+                            continue
+                        payload = raw[6:]
+                        if payload == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(payload)
+                        except json.JSONDecodeError:
+                            continue
 
-                msg = resp.json()['message']
-                tool_calls = msg.get('tool_calls') or []
+                        delta = chunk['choices'][0].get('delta', {})
 
-                if not tool_calls:
-                    content = _strip_thinking(msg.get('content', ''))
-                    _save_message(session_id, 'assistant', content)
+                        for tc in (delta.get('tool_calls') or []):
+                            idx = tc['index']
+                            if idx not in accumulated_tool_calls:
+                                accumulated_tool_calls[idx] = {
+                                    'id': '', 'function': {'name': '', 'arguments': ''},
+                                }
+                            if tc.get('id'):
+                                accumulated_tool_calls[idx]['id'] = tc['id']
+                            fn = tc.get('function', {})
+                            accumulated_tool_calls[idx]['function']['name'] += fn.get('name') or ''
+                            accumulated_tool_calls[idx]['function']['arguments'] += fn.get('arguments') or ''
+
+                        content = delta.get('content') or ''
+                        if not content:
+                            continue
+                        if past_thinking:
+                            accumulated_content += content
+                            yield (json.dumps({'chunk': content}) + '\n').encode()
+                        else:
+                            think_buf += content
+                            if '<channel|>' in think_buf:
+                                past_thinking = True
+                                after = think_buf.split('<channel|>', 1)[1]
+                                think_buf = ''
+                                if after:
+                                    accumulated_content += after
+                                    yield (json.dumps({'chunk': after}) + '\n').encode()
+                            elif len(think_buf) > 30 and not think_buf.startswith('<|channel>'):
+                                past_thinking = True
+                                accumulated_content += think_buf
+                                yield (json.dumps({'chunk': think_buf}) + '\n').encode()
+                                think_buf = ''
+
+                if accumulated_tool_calls:
+                    tool_calls_list = [
+                        {
+                            'id': tc['id'],
+                            'type': 'function',
+                            'function': {
+                                'name': tc['function']['name'],
+                                'arguments': tc['function']['arguments'],
+                            },
+                        }
+                        for tc in accumulated_tool_calls.values()
+                    ]
+                    loop_messages.append({
+                        'role': 'assistant',
+                        'content': None,
+                        'tool_calls': tool_calls_list,
+                    })
+
+                    for tc in tool_calls_list:
+                        fn = tc['function']
+                        name = fn['name']
+                        args = fn['arguments']
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
+                        label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
+                        yield (json.dumps({'status': label}) + '\n').encode()
+                        handler = _RESEARCH_TOOL_HANDLERS.get(name)
+                        result = handler(args) if handler else f'Unknown tool: {name}'
+                        _save_message(session_id, 'tool', result)
+                        loop_messages.append({
+                            'role': 'tool',
+                            'tool_call_id': tc['id'],
+                            'content': result,
+                        })
+                else:
+                    _save_message(session_id, 'assistant', accumulated_content)
                     _touch_session(session_id)
-                    yield (json.dumps({'message': {'content': content}}) + '\n').encode()
                     break
 
-                loop_messages.append(msg)
-
-                for tc in tool_calls:
-                    fn = tc.get('function', {})
-                    name = fn.get('name', '')
-                    args = fn.get('arguments', {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-                    label = _TOOL_STATUS.get(name, lambda a: f'Using {name}…')(args)
-                    yield (json.dumps({'status': label}) + '\n').encode()
-                    handler = _RESEARCH_TOOL_HANDLERS.get(name)
-                    result = handler(args) if handler else f'Unknown tool: {name}'
-                    _save_message(session_id, 'tool', result)
-                    loop_messages.append({'role': 'tool', 'content': result})
-
         except httpx.ConnectError:
-            yield b'{"error": "Cannot connect to Ollama. Is it running?"}\n'
+            yield b'{"error": "Cannot connect to oMLX. Is it running?"}\n'
         except httpx.HTTPStatusError as exc:
-            yield (json.dumps({'error': f'Ollama error: {exc.response.status_code}'}) + '\n').encode()
+            yield (json.dumps({'error': f'oMLX error: {exc.response.status_code}'}) + '\n').encode()
         except Exception as exc:
             yield (json.dumps({'error': str(exc)}) + '\n').encode()
 
@@ -874,17 +1025,17 @@ def summarise_session(session_id: int) -> Response:
 
     try:
         resp = httpx.post(
-            f'{OLLAMA_URL}/api/chat',
+            f'{OMLX_URL}/v1/chat/completions',
+            headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
             json={
-                'model': DEFAULT_MODEL,
+                'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
-                'stream': False,
-                'options': {'num_ctx': 8192, 'num_predict': 512},
+                'max_tokens': 512,
             },
             timeout=120.0,
         )
         resp.raise_for_status()
-        summary = _strip_thinking(resp.json()['message'].get('content', ''))
+        summary = _strip_thinking(resp.json()['choices'][0]['message'].get('content', ''))
     except Exception as exc:
         return jsonify({'error': str(exc)}), 500
 
@@ -895,9 +1046,24 @@ def summarise_session(session_id: int) -> Response:
         )
         conn.commit()
 
-    # transcript is already truncated to 500 chars/message; _MEMORY_TRANSCRIPT_LIMIT
-    # applies a further ceiling on the full joined string to keep Ollama context manageable.
-    _update_memory(transcript)
+    # Run memory update in a background thread with a delay so it does not compete
+    # with the user's next chat request on the GPU (oMLX batches concurrent requests).
+    app = current_app._get_current_object()
+    delay = _MEMORY_UPDATE_DELAY_SECS
+
+    def _deferred():
+        import time
+        _set_bg_status('queued', 'Memory update queued — fires shortly')
+        if delay:
+            time.sleep(delay)
+        _set_bg_status('running', 'Updating investor memory…')
+        try:
+            with app.app_context():
+                _update_memory(transcript)
+        finally:
+            _set_bg_status('idle', 'Model ready')
+
+    threading.Thread(target=_deferred, daemon=True).start()
 
     return jsonify({'ok': True, 'summary': summary})
 
@@ -922,17 +1088,17 @@ def get_session_title(session_id: int) -> Response:
 
     try:
         resp = httpx.post(
-            f'{OLLAMA_URL}/api/chat',
+            f'{OMLX_URL}/v1/chat/completions',
+            headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
             json={
-                'model': DEFAULT_MODEL,
+                'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
-                'stream': False,
-                'options': {'num_ctx': 4096, 'num_predict': 32},
+                'max_tokens': 32,
             },
             timeout=60.0,
         )
         resp.raise_for_status()
-        title = _strip_thinking(resp.json()['message'].get('content', ''))[:100]
+        title = _strip_thinking(resp.json()['choices'][0]['message'].get('content', ''))[:100]
     except Exception:
         return jsonify({'title': 'Research session'})
 
