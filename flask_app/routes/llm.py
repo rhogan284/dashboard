@@ -15,13 +15,10 @@ llm_bp = Blueprint('llm', __name__)
 OMLX_URL = os.getenv('OMLX_BASE_URL', 'http://localhost:8002')
 OMLX_MODEL = os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit')
 OMLX_API_KEY = os.getenv('OMLX_API_KEY', '')
+OMLX_TEMPERATURE = float(os.getenv('OMLX_TEMPERATURE', '0.7'))
 
 
 def _strip_thinking(content: str) -> str:
-    """Strip Gemma 4 thinking blocks from response content.
-
-    Gemma 4 wraps reasoning in <|channel>thought\\n...<channel|> blocks.
-    """
     content = re.sub(r'<\|channel>thought\n.*?<channel\|>', '', content, flags=re.DOTALL)
     return content.strip()
 
@@ -345,6 +342,7 @@ def chat() -> Response:
                         'messages': loop_messages,
                         'tools': TOOLS,
                         'max_tokens': 4096 if think else 2048,
+                        'temperature': OMLX_TEMPERATURE,
                         'stream': True,
                     },
                     timeout=300.0 if think else 120.0,

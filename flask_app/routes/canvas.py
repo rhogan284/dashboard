@@ -15,6 +15,7 @@ canvas_bp = Blueprint('canvas', __name__)
 
 OMLX_URL = os.getenv('OMLX_BASE_URL', 'http://localhost:8002')
 OMLX_MODEL = os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit')
+OMLX_TEMPERATURE = float(os.getenv('OMLX_TEMPERATURE', '0.7'))
 CANVAS_BASE_URL = os.getenv('CANVAS_BASE_URL', '').rstrip('/')
 CANVAS_KEY = os.getenv('CANVAS_KEY', '')
 
@@ -978,6 +979,7 @@ def chat() -> Response:
                         'messages': loop_messages,
                         'tools': CANVAS_TOOLS,
                         'max_tokens': 4096 if think else 2048,
+                        'temperature': OMLX_TEMPERATURE,
                         'stream': True,
                     },
                     timeout=300.0 if think else 120.0,
@@ -1115,6 +1117,7 @@ def summarise_session(session_id: int) -> Response:
                 'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
                 'max_tokens': 512,
+                'temperature': OMLX_TEMPERATURE,
             },
             timeout=120.0,
         )
@@ -1159,6 +1162,7 @@ def get_session_title(session_id: int) -> Response:
                 'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
                 'max_tokens': 32,
+                'temperature': OMLX_TEMPERATURE,
             },
             timeout=60.0,
         )

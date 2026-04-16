@@ -16,6 +16,7 @@ research_bp = Blueprint('research', __name__)
 
 OMLX_URL = os.getenv('OMLX_BASE_URL', 'http://localhost:8002')
 OMLX_MODEL = os.getenv('OMLX_MODEL', 'gemma-4-26b-a4b-it-4bit')
+OMLX_TEMPERATURE = float(os.getenv('OMLX_TEMPERATURE', '0.7'))
 PORTFOLIO_DB_PATH = os.getenv(
     'PORTFOLIO_DB_PATH',
     '/Users/ryanhogan/Desktop/Coding Work/portfolio_app/portfolio.db',
@@ -23,7 +24,7 @@ PORTFOLIO_DB_PATH = os.getenv(
 
 RESEARCH_MEMORY_PATH = Path(__file__).parent.parent / 'research_memory'
 _MEMORY_TRANSCRIPT_LIMIT = 8000
-_MEMORY_UPDATE_DELAY_SECS = 15  # seconds to wait before firing _update_memory (avoids GPU contention)
+_MEMORY_UPDATE_DELAY_SECS = 3  # seconds to wait before firing _update_memory (avoids GPU contention)
 
 # ---------------------------------------------------------------------------
 # Background task status (thread-safe, polled by the UI)
@@ -68,6 +69,7 @@ def _update_memory(transcript: str) -> None:
                 'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
                 'max_tokens': 4096,
+                'temperature': OMLX_TEMPERATURE,
             },
             timeout=300.0,
         )
@@ -697,6 +699,7 @@ def chat() -> Response:
                         'messages': loop_messages,
                         'tools': RESEARCH_TOOLS,
                         'max_tokens': 4096 if think else 2048,
+                        'temperature': OMLX_TEMPERATURE,
                         'stream': True,
                     },
                     timeout=300.0 if think else 120.0,
@@ -894,6 +897,7 @@ def portfolio_review() -> Response:
                         'messages': loop_messages,
                         'tools': RESEARCH_TOOLS,
                         'max_tokens': 4096,
+                        'temperature': OMLX_TEMPERATURE,
                         'stream': True,
                     },
                     timeout=300.0,
@@ -1031,6 +1035,7 @@ def summarise_session(session_id: int) -> Response:
                 'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
                 'max_tokens': 512,
+                'temperature': OMLX_TEMPERATURE,
             },
             timeout=120.0,
         )
@@ -1094,6 +1099,7 @@ def get_session_title(session_id: int) -> Response:
                 'model': OMLX_MODEL,
                 'messages': [{'role': 'user', 'content': prompt}],
                 'max_tokens': 32,
+                'temperature': OMLX_TEMPERATURE,
             },
             timeout=60.0,
         )
