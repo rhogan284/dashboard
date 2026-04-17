@@ -110,4 +110,45 @@
       console.error('Network error fetching auth URL', e);
     }
   });
+
+  // ── Morning Brief section toggles ────────────────────────────────────────
+
+  const BRIEF_SECTIONS = ['gmail', 'calendar', 'markets', 'canvas'];
+
+  async function loadBriefConfig() {
+    try {
+      const res = await fetch('/api/brief/config');
+      if (!res.ok) return;
+      const config = await res.json();
+      for (const key of BRIEF_SECTIONS) {
+        const el = document.getElementById(`brief-toggle-${key}`);
+        if (el) el.checked = config[key] !== false;
+      }
+    } catch {
+      // silently ignore
+    }
+  }
+
+  async function patchBriefConfig(key, value) {
+    try {
+      await fetch('/api/brief/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value }),
+      });
+    } catch {
+      // silently ignore
+    }
+  }
+
+  for (const key of BRIEF_SECTIONS) {
+    const el = document.getElementById(`brief-toggle-${key}`);
+    if (el) {
+      el.addEventListener('change', () => patchBriefConfig(key, el.checked));
+    }
+  }
+
+  settingsBtn.addEventListener('click', () => {
+    loadBriefConfig();
+  });
 })();
