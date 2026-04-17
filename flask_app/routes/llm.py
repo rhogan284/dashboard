@@ -206,6 +206,22 @@ TOOLS = [
             },
         },
     },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_morning_brief',
+            'description': (
+                "Fetch today's morning brief — a summary of email, calendar, markets, and academics. "
+                "Call this when the user asks for an action plan, wants to plan their day, "
+                "or asks what's happening today."
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {},
+                'required': [],
+            },
+        },
+    },
 ]
 
 # Human-readable status labels shown in the UI while a tool runs
@@ -219,6 +235,7 @@ _TOOL_STATUS = {
     'create_task':           lambda a: f"Creating task: \"{a.get('text', '')}\"",
     'update_task':           lambda a: 'Updating task…',
     'delete_task':           lambda a: 'Deleting task…',
+    'get_morning_brief':     lambda a: 'Reading morning brief…',
 }
 
 # ---------------------------------------------------------------------------
@@ -502,6 +519,16 @@ def _create_gmail_draft(args: dict) -> str:
         return f'Error creating draft: {exc}'
 
 
+def _get_morning_brief(_args: dict) -> str:
+    brief_path = Path(current_app.config['DATA_DIR']) / 'morning_brief.md'
+    if not brief_path.exists():
+        return 'No morning brief has been generated yet. Ask the user to generate one from the Morning Brief tab.'
+    try:
+        return brief_path.read_text()
+    except OSError as exc:
+        return f'Error reading morning brief: {exc}'
+
+
 _TOOL_HANDLERS = {
     'search_web':            _search_web,
     'list_calendar_events':  _list_calendar_events,
@@ -512,6 +539,7 @@ _TOOL_HANDLERS = {
     'create_task':           _create_task,
     'update_task':           _update_task,
     'delete_task':           _delete_task,
+    'get_morning_brief':     _get_morning_brief,
 }
 
 # ---------------------------------------------------------------------------
@@ -539,9 +567,14 @@ def chat() -> Response:
         'content': (
             f"{think_prefix}You are a helpful personal assistant. Today is {today}. "
             f"The user's local UTC offset is {offset_str} — use this when creating calendar events. "
-            "You have access to the user's Google Calendar, Gmail, and Google Tasks via tools. "
+            "You have access to the user's Google Calendar, Gmail, Google Tasks, and today's morning brief via tools. "
             "Use tools whenever the user asks you to search the web, check/create/delete calendar events, "
-            "draft an email, or manage their to-do tasks. Be concise and always confirm what action was taken."
+            "draft an email, or manage their to-do tasks. Be concise and always confirm what action was taken. "
+            "When the user asks for an 'action plan', 'plan my day', or anything similar: "
+            "first call get_morning_brief to fetch today's brief, then systematically review it and "
+            "create calendar events and tasks for any commitments, deadlines, or priorities mentioned. "
+            "Always summarise what you created at the end. "
+            "If you are about to create more than 5 items, list them first and ask for confirmation before proceeding."
         ),
     }
 
