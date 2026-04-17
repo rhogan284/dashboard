@@ -77,7 +77,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts'
 from morning_brief import (
     format_today_events,
     format_week_events,
-    assemble_brief,
 )
 
 
@@ -113,13 +112,3 @@ def test_format_week_events_empty():
     assert format_week_events([]) == '(no events this week)'
 
 
-def test_assemble_brief_contains_all_sections():
-    gmail_md = '## 📧 Email Highlights\n- Nothing urgent'
-    markets_md = '## 🇺🇸 US Markets\nS&P flat'
-    calendar_md = '## 📅 Calendar\nNo events'
-    result = assemble_brief(gmail_md, markets_md, calendar_md, 'Monday, March 30, 2026')
-    assert 'Morning Brief' in result
-    assert 'Email Highlights' in result
-    assert 'US Markets' in result
-    assert 'Calendar' in result
-    assert 'Monday, March 30, 2026' in result

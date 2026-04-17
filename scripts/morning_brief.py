@@ -467,19 +467,6 @@ def build_calendar_md(calendar_data: list) -> str:
 """
 
 
-def assemble_brief(gmail_md: str, markets_md: str, calendar_md: str, today_str: str, canvas_md: str = '') -> str:
-    """Combine all markdown sections into the full brief."""
-    canvas_section = f'\n{canvas_md}\n' if canvas_md else ''
-    return f"""# Morning Brief — {today_str}
-
-{gmail_md}
-
-{calendar_md}
-{canvas_section}
-{markets_md}
-"""
-
-
 # ---------------------------------------------------------------------------
 # Atomic file writes
 # ---------------------------------------------------------------------------
@@ -548,7 +535,7 @@ def main():
         'gmail_connected': True,
     })
 
-    creds = load_credentials()
+    creds = load_credentials() if config['gmail'] or config['calendar'] else None
     tavily_client = TavilyClient(api_key=os.getenv('TAVILY_API_KEY', ''))
 
     # Launch only enabled fetches in parallel
