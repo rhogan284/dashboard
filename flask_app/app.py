@@ -25,6 +25,9 @@ def _preload_omlx():
         )
     except Exception:
         pass
+    finally:
+        from routes.research import _set_bg_status
+        _set_bg_status('idle', 'Model ready')
 
 
 def create_app(config: dict | None = None) -> Flask:
@@ -38,7 +41,6 @@ def create_app(config: dict | None = None) -> Flask:
     app.config['DATA_DIR'].mkdir(exist_ok=True)
 
     from routes.llm import llm_bp
-    from routes.notes import notes_bp
     from routes.calendar import calendar_bp
     from routes.brief import brief_bp
     from routes.tasks import tasks_bp
@@ -47,7 +49,6 @@ def create_app(config: dict | None = None) -> Flask:
     from routes.weather import weather_bp
 
     app.register_blueprint(llm_bp)
-    app.register_blueprint(notes_bp)
     app.register_blueprint(calendar_bp)
     app.register_blueprint(brief_bp)
     app.register_blueprint(tasks_bp)

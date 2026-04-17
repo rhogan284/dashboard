@@ -11,9 +11,6 @@
   // ── DOM refs ──────────────────────────────────────────────────────────────────
   const newChatBtn      = document.getElementById('research-new-chat');
   const sessionList     = document.getElementById('research-session-list');
-  const pinboardList    = document.getElementById('research-pinboard-list');
-  const pinboardWarn    = document.getElementById('research-pinboard-warn');
-  const addPinBtn       = document.getElementById('research-add-pin');
   const historyDiv      = document.getElementById('research-history');
   const scrollArea      = document.getElementById('research-scroll-area');
   const thinkingDiv     = document.getElementById('research-thinking');
@@ -185,159 +182,6 @@
       errorP.textContent = 'Failed to load session.';
       errorP.classList.remove('hidden');
     }
-  }
-
-  // ── Pinboard ───────────────────────────────────────────────────────────────────
-
-  async function loadPinboard() {
-    try {
-      const res = await fetch('/api/research/pinboard');
-      if (!res.ok) return;
-      const notes = await res.json();
-      renderPinboard(notes);
-    } catch (_) {}
-  }
-
-  function renderPinboard(notes) {
-    pinboardList.innerHTML = '';
-    const totalChars = notes.reduce((sum, n) => sum + n.content.length, 0);
-    pinboardWarn.classList.toggle('hidden', totalChars <= 2000);
-
-    for (const note of notes) {
-      const li = document.createElement('li');
-      li.className = 'group rounded-lg overflow-hidden';
-
-      const header = document.createElement('div');
-      header.className =
-        'flex items-center justify-between px-2 py-1.5 cursor-pointer hover:bg-gray-800 rounded-lg transition-colors';
-      const titleSpan = document.createElement('span');
-      titleSpan.className = 'text-xs text-gray-300 truncate flex-1';
-      titleSpan.textContent = note.title;
-
-      const tags = (note.tags || '').split(',').map(t => t.trim()).filter(Boolean);
-
-      const delBtn = document.createElement('button');
-      delBtn.className = 'ml-1 text-gray-600 hover:text-red-400 text-xs transition-colors opacity-0 group-hover:opacity-100';
-      delBtn.textContent = '✕';
-      delBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await fetch(`/api/research/pinboard/${note.id}`, { method: 'DELETE' });
-        loadPinboard();
-      });
-
-      header.appendChild(titleSpan);
-      tags.forEach(t => {
-        const s = document.createElement('span');
-        s.className = 'ml-1 px-1 py-0.5 bg-gray-700 text-gray-500 text-xs rounded';
-        s.textContent = t;
-        header.appendChild(s);
-      });
-      header.appendChild(delBtn);
-
-      const body = document.createElement('div');
-      body.className = 'hidden px-2 pb-2 space-y-1';
-      const titleInput = document.createElement('input');
-      titleInput.value = note.title;
-      titleInput.className =
-        'w-full bg-gray-800 text-white text-xs rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500';
-      const contentTA = document.createElement('textarea');
-      contentTA.value = note.content;
-      contentTA.rows = 4;
-      contentTA.className =
-        'w-full bg-gray-800 text-gray-200 text-xs rounded px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500';
-      const tagsInput = document.createElement('input');
-      tagsInput.value = note.tags;
-      tagsInput.placeholder = 'tags (comma-separated)';
-      tagsInput.className =
-        'w-full bg-gray-800 text-gray-400 text-xs rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500';
-      const saveBtn = document.createElement('button');
-      saveBtn.textContent = 'Save';
-      saveBtn.className = 'px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors';
-      saveBtn.addEventListener('click', async () => {
-        await fetch(`/api/research/pinboard/${note.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: titleInput.value.trim(),
-            content: contentTA.value.trim(),
-            tags: tagsInput.value.trim(),
-          }),
-        });
-        loadPinboard();
-      });
-
-      body.appendChild(titleInput);
-      body.appendChild(contentTA);
-      body.appendChild(tagsInput);
-      body.appendChild(saveBtn);
-
-      header.addEventListener('click', () => {
-        body.classList.toggle('hidden');
-      });
-
-      li.appendChild(header);
-      li.appendChild(body);
-      pinboardList.appendChild(li);
-    }
-  }
-
-  function showAddPinForm() {
-    const existing = document.getElementById('research-add-pin-form');
-    if (existing) { existing.remove(); return; }
-
-    const form = document.createElement('li');
-    form.id = 'research-add-pin-form';
-    form.className = 'rounded-lg bg-gray-800 p-2 space-y-1 mb-1';
-
-    const titleInput = document.createElement('input');
-    titleInput.placeholder = 'Title';
-    titleInput.className =
-      'w-full bg-gray-700 text-white text-xs rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500';
-    const contentTA = document.createElement('textarea');
-    contentTA.placeholder = 'Note body…';
-    contentTA.rows = 3;
-    contentTA.className =
-      'w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500';
-    const tagsInput = document.createElement('input');
-    tagsInput.placeholder = 'tags (comma-separated)';
-    tagsInput.className =
-      'w-full bg-gray-700 text-gray-400 text-xs rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500';
-    const row = document.createElement('div');
-    row.className = 'flex gap-1';
-    const saveBtn = document.createElement('button');
-    saveBtn.textContent = 'Add';
-    saveBtn.className =
-      'flex-1 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.className =
-      'flex-1 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded transition-colors';
-
-    saveBtn.addEventListener('click', async () => {
-      const title = titleInput.value.trim();
-      if (!title) return;
-      await fetch('/api/research/pinboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          content: contentTA.value.trim(),
-          tags: tagsInput.value.trim(),
-        }),
-      });
-      form.remove();
-      loadPinboard();
-    });
-    cancelBtn.addEventListener('click', () => form.remove());
-
-    row.appendChild(saveBtn);
-    row.appendChild(cancelBtn);
-    form.appendChild(titleInput);
-    form.appendChild(contentTA);
-    form.appendChild(tagsInput);
-    form.appendChild(row);
-    pinboardList.prepend(form);
-    titleInput.focus();
   }
 
   // ── Session lifecycle ──────────────────────────────────────────────────────────
@@ -549,7 +393,6 @@
 
   window.researchTabActivated = function () {
     loadSessions();
-    loadPinboard();
   };
 
   // ── Event listeners ────────────────────────────────────────────────────────────
@@ -581,7 +424,5 @@
       : 'px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-md transition-colors';
     if (hidden) filePathInput.focus();
   });
-
-  addPinBtn.addEventListener('click', showAddPinForm);
 
 })();

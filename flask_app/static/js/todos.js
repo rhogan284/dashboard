@@ -5,6 +5,7 @@
   const inputRow     = document.getElementById('todo-input-row');
   const list         = document.getElementById('todo-list');
   const connectPrompt = document.getElementById('todo-connect-prompt');
+  const refreshBtn   = document.getElementById('todo-refresh');
 
   function escapeHtml(text) {
     const div = document.createElement('div');
@@ -80,11 +81,13 @@
   function showConnected() {
     inputRow.classList.remove('hidden');
     connectPrompt.classList.add('hidden');
+    refreshBtn.classList.remove('hidden');
   }
 
   function showDisconnected() {
     inputRow.classList.add('hidden');
     connectPrompt.classList.remove('hidden');
+    refreshBtn.classList.add('hidden');
     list.innerHTML = '';
   }
 
@@ -170,6 +173,7 @@
   // ── Event listeners ───────────────────────────────────────────────
 
   addBtn.addEventListener('click', addTodo);
+  refreshBtn.addEventListener('click', loadTodos);
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter') addTodo();
   });

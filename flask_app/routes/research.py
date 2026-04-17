@@ -30,7 +30,7 @@ _MEMORY_UPDATE_DELAY_SECS = 3  # seconds to wait before firing _update_memory (a
 # Background task status (thread-safe, polled by the UI)
 # ---------------------------------------------------------------------------
 _bg_lock = threading.Lock()
-_bg_status_state: dict = {'state': 'idle', 'task': 'Model ready'}
+_bg_status_state: dict = {'state': 'running', 'task': 'Loading model…'}
 
 
 def _set_bg_status(state: str, task: str) -> None:
@@ -120,14 +120,6 @@ def _init_db():
                 content     TEXT NOT NULL,
                 created_at  TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS research_pinboard (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                title       TEXT NOT NULL,
-                content     TEXT NOT NULL,
-                tags        TEXT NOT NULL DEFAULT '',
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            );
             CREATE INDEX IF NOT EXISTS idx_research_messages_session
                 ON research_messages(session_id);
         """)
@@ -212,66 +204,6 @@ def update_session(session_id: int):
 def delete_session(session_id: int):
     with _get_db() as conn:
         conn.execute("DELETE FROM research_sessions WHERE id = ?", (session_id,))
-        conn.commit()
-    return jsonify({'ok': True})
-
-
-# ---------------------------------------------------------------------------
-# Pinboard routes
-# ---------------------------------------------------------------------------
-
-@research_bp.route('/api/research/pinboard', methods=['GET'])
-def list_pinboard():
-    with _get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, title, content, tags, created_at, updated_at FROM research_pinboard ORDER BY created_at DESC"
-        ).fetchall()
-    return jsonify([dict(r) for r in rows])
-
-
-@research_bp.route('/api/research/pinboard', methods=['POST'])
-def add_pinboard_note():
-    data = request.get_json(silent=True) or {}
-    title = str(data.get('title', '')).strip()
-    content = str(data.get('content', '')).strip()
-    tags = str(data.get('tags', '')).strip()
-    if not title:
-        return jsonify({'error': 'title required'}), 400
-    now = datetime.now(timezone.utc).isoformat()
-    with _get_db() as conn:
-        cur = conn.execute(
-            "INSERT INTO research_pinboard (title, content, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (title, content, tags, now, now),
-        )
-        conn.commit()
-    return jsonify({'id': cur.lastrowid})
-
-
-@research_bp.route('/api/research/pinboard/<int:note_id>', methods=['PATCH'])
-def update_pinboard_note(note_id: int):
-    data = request.get_json(silent=True) or {}
-    now = datetime.now(timezone.utc).isoformat()
-    fields = []
-    values = []
-    for col in ('title', 'content', 'tags'):
-        if col in data:
-            fields.append(f"{col} = ?")
-            values.append(str(data[col]))
-    if not fields:
-        return jsonify({'error': 'nothing to update'}), 400
-    fields.append("updated_at = ?")
-    values.append(now)
-    values.append(note_id)
-    with _get_db() as conn:
-        conn.execute(f"UPDATE research_pinboard SET {', '.join(fields)} WHERE id = ?", values)
-        conn.commit()
-    return jsonify({'ok': True})
-
-
-@research_bp.route('/api/research/pinboard/<int:note_id>', methods=['DELETE'])
-def delete_pinboard_note(note_id: int):
-    with _get_db() as conn:
-        conn.execute("DELETE FROM research_pinboard WHERE id = ?", (note_id,))
         conn.commit()
     return jsonify({'ok': True})
 
@@ -639,9 +571,6 @@ def chat() -> Response:
 
     # Build memory context
     with _get_db() as conn:
-        pinboard_rows = conn.execute(
-            "SELECT title, content, tags FROM research_pinboard ORDER BY created_at DESC"
-        ).fetchall()
         summary_rows = conn.execute(
             "SELECT auto_summary FROM research_sessions "
             "WHERE auto_summary IS NOT NULL AND auto_summary != '' "
@@ -649,10 +578,6 @@ def chat() -> Response:
             "ORDER BY updated_at DESC LIMIT 5",
             (session_id,),
         ).fetchall()
-
-    pinboard_text = '\n\n'.join(
-        f"**{r['title']}** [{r['tags']}]\n{r['content']}" for r in pinboard_rows
-    ) if pinboard_rows else '(no notes yet)'
 
     summaries_text = '\n\n'.join(
         f"- {r['auto_summary']}" for r in summary_rows
@@ -670,7 +595,6 @@ def chat() -> Response:
         "It is updated automatically after each session. When Ryan asks what you know about him, "
         "his portfolio, or your context, draw from this section.\n\n"
         f"=== Investor Memory ===\n{memory_text}\n\n"
-        f"=== Investment Notes & Theses ===\n{pinboard_text}\n\n"
         f"=== Past Research Summaries ===\n{summaries_text}"
     )
     system_msg = {'role': 'system', 'content': system_content}
@@ -853,15 +777,6 @@ def portfolio_review() -> Response:
     utc_offset = datetime.now().astimezone().strftime('%z')
     offset_str = f"{utc_offset[:3]}:{utc_offset[3:]}"
 
-    with _get_db() as conn:
-        pinboard_rows = conn.execute(
-            "SELECT title, content, tags FROM research_pinboard ORDER BY created_at DESC"
-        ).fetchall()
-
-    pinboard_text = '\n\n'.join(
-        f"**{r['title']}** [{r['tags']}]\n{r['content']}" for r in pinboard_rows
-    ) if pinboard_rows else '(no notes yet)'
-
     memory_text = _read_memory()
 
     system_msg = {
@@ -874,8 +789,7 @@ def portfolio_review() -> Response:
             "The === Investor Memory === section below is your persistent memory file about Ryan. "
             "It is updated automatically after each session. When Ryan asks what you know about him, "
             "his portfolio, or your context, draw from this section.\n\n"
-            f"=== Investor Memory ===\n{memory_text}\n\n"
-            f"=== Investment Notes & Theses ===\n{pinboard_text}"
+            f"=== Investor Memory ===\n{memory_text}"
         ),
     }
 

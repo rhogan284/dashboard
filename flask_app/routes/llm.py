@@ -3,6 +3,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -123,6 +124,87 @@ TOOLS = [
             },
         },
     },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'list_tasks',
+            'description': "List the user's Google Tasks.",
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'include_completed': {
+                        'type': 'boolean',
+                        'description': 'Whether to include completed tasks (default false)',
+                    },
+                },
+                'required': [],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'create_task',
+            'description': "Create a new task in the user's Google Tasks.",
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'text': {'type': 'string', 'description': 'Task title/description'},
+                    'due_date': {
+                        'type': 'string',
+                        'description': 'Optional due date in YYYY-MM-DD format',
+                    },
+                },
+                'required': ['text'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'update_task',
+            'description': (
+                "Update a task in Google Tasks — mark it complete/incomplete, change its title, or change its due date. "
+                'Use list_tasks first to find the task ID.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'task_id': {'type': 'string', 'description': 'The Google Tasks task ID'},
+                    'completed': {
+                        'type': 'boolean',
+                        'description': 'Mark the task as completed (true) or not (false)',
+                    },
+                    'text': {
+                        'type': 'string',
+                        'description': 'New title for the task (optional)',
+                    },
+                    'due_date': {
+                        'type': 'string',
+                        'description': 'New due date in YYYY-MM-DD format, or empty string to clear it (optional)',
+                    },
+                },
+                'required': ['task_id'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'delete_task',
+            'description': (
+                "Delete a task from Google Tasks. "
+                'Use list_tasks first to find the task ID.'
+            ),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'task_id': {'type': 'string', 'description': 'The Google Tasks task ID'},
+                },
+                'required': ['task_id'],
+            },
+        },
+    },
 ]
 
 # Human-readable status labels shown in the UI while a tool runs
@@ -132,6 +214,10 @@ _TOOL_STATUS = {
     'create_calendar_event': lambda a: f"Creating event: \"{a.get('summary', '')}\"",
     'delete_calendar_event': lambda a: 'Deleting event…',
     'create_gmail_draft':    lambda a: f"Drafting email to {a.get('to', '')}…",
+    'list_tasks':            lambda a: 'Checking tasks…',
+    'create_task':           lambda a: f"Creating task: \"{a.get('text', '')}\"",
+    'update_task':           lambda a: 'Updating task…',
+    'delete_task':           lambda a: 'Deleting task…',
 }
 
 # ---------------------------------------------------------------------------
@@ -268,6 +354,136 @@ def _delete_calendar_event(args: dict) -> str:
         return f'Error deleting event: {exc}'
 
 
+def _load_gtasks_token() -> dict | None:
+    token_path = Path(current_app.config['DATA_DIR']) / 'gtasks_token.json'
+    if not token_path.exists():
+        return None
+    try:
+        data = json.loads(token_path.read_text())
+        if time.time() * 1000 > data.get('expires_at', 0):
+            return None
+        return data
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+_TASKS_API = 'https://tasks.googleapis.com/tasks/v1'
+_TASKLIST = '@default'
+
+
+def _list_tasks(args: dict) -> str:
+    import httpx as _httpx
+    token = _load_gtasks_token()
+    if not token:
+        return 'Error: Google Tasks not connected. Ask the user to connect in Settings.'
+    include_completed = bool(args.get('include_completed', False))
+    try:
+        resp = _httpx.get(
+            f'{_TASKS_API}/lists/{_TASKLIST}/tasks',
+            params={
+                'showCompleted': str(include_completed).lower(),
+                'showHidden': str(include_completed).lower(),
+                'maxResults': '100',
+            },
+            headers={'Authorization': f"Bearer {token['access_token']}"},
+        )
+        resp.raise_for_status()
+        tasks = resp.json().get('items', [])
+        if not tasks:
+            return 'No tasks found.'
+        lines = []
+        for t in tasks:
+            due = t.get('due', '')[:10] if t.get('due') else ''
+            status = 'done' if t.get('status') == 'completed' else 'todo'
+            line = f"ID: {t['id']} [{status}] {t.get('title', '')}"
+            if due:
+                line += f" (due {due})"
+            lines.append(line)
+        return '\n'.join(lines)
+    except Exception as exc:
+        return f'Error listing tasks: {exc}'
+
+
+def _create_task(args: dict) -> str:
+    import httpx as _httpx
+    token = _load_gtasks_token()
+    if not token:
+        return 'Error: Google Tasks not connected. Ask the user to connect in Settings.'
+    text = str(args.get('text', '')).strip()
+    if not text:
+        return 'Error: task text is required.'
+    body: dict = {'title': text, 'status': 'needsAction'}
+    due_date = str(args.get('due_date', '')).strip()
+    if due_date:
+        body['due'] = f'{due_date}T00:00:00.000Z'
+    try:
+        resp = _httpx.post(
+            f'{_TASKS_API}/lists/{_TASKLIST}/tasks',
+            json=body,
+            headers={'Authorization': f"Bearer {token['access_token']}"},
+        )
+        resp.raise_for_status()
+        t = resp.json()
+        return f"Created task \"{t.get('title', text)}\" (ID: {t['id']})"
+    except Exception as exc:
+        return f'Error creating task: {exc}'
+
+
+def _update_task(args: dict) -> str:
+    import httpx as _httpx
+    token = _load_gtasks_token()
+    if not token:
+        return 'Error: Google Tasks not connected. Ask the user to connect in Settings.'
+    task_id = str(args.get('task_id', '')).strip()
+    if not task_id:
+        return 'Error: task_id is required.'
+    body: dict = {}
+    if 'completed' in args:
+        completed = bool(args['completed'])
+        body['status'] = 'completed' if completed else 'needsAction'
+        if not completed:
+            body['completed'] = None
+    if 'text' in args:
+        body['title'] = str(args['text']).strip()
+    if 'due_date' in args:
+        due_date = str(args['due_date']).strip()
+        body['due'] = f'{due_date}T00:00:00.000Z' if due_date else None
+    if not body:
+        return 'Error: nothing to update.'
+    try:
+        resp = _httpx.patch(
+            f'{_TASKS_API}/lists/{_TASKLIST}/tasks/{task_id}',
+            json=body,
+            headers={'Authorization': f"Bearer {token['access_token']}"},
+        )
+        resp.raise_for_status()
+        t = resp.json()
+        return f"Updated task \"{t.get('title', task_id)}\""
+    except Exception as exc:
+        return f'Error updating task: {exc}'
+
+
+def _delete_task(args: dict) -> str:
+    import httpx as _httpx
+    token = _load_gtasks_token()
+    if not token:
+        return 'Error: Google Tasks not connected. Ask the user to connect in Settings.'
+    task_id = str(args.get('task_id', '')).strip()
+    if not task_id:
+        return 'Error: task_id is required.'
+    try:
+        resp = _httpx.delete(
+            f'{_TASKS_API}/lists/{_TASKLIST}/tasks/{task_id}',
+            headers={'Authorization': f"Bearer {token['access_token']}"},
+        )
+        if resp.status_code == 404:
+            return f'Task {task_id} not found.'
+        resp.raise_for_status()
+        return f'Deleted task {task_id}.'
+    except Exception as exc:
+        return f'Error deleting task: {exc}'
+
+
 def _create_gmail_draft(args: dict) -> str:
     try:
         from googleapiclient.discovery import build
@@ -291,6 +507,10 @@ _TOOL_HANDLERS = {
     'create_calendar_event': _create_calendar_event,
     'delete_calendar_event': _delete_calendar_event,
     'create_gmail_draft':    _create_gmail_draft,
+    'list_tasks':            _list_tasks,
+    'create_task':           _create_task,
+    'update_task':           _update_task,
+    'delete_task':           _delete_task,
 }
 
 # ---------------------------------------------------------------------------
@@ -318,9 +538,9 @@ def chat() -> Response:
         'content': (
             f"{think_prefix}You are a helpful personal assistant. Today is {today}. "
             f"The user's local UTC offset is {offset_str} — use this when creating calendar events. "
-            "You have access to the user's Google Calendar and Gmail via tools. "
+            "You have access to the user's Google Calendar, Gmail, and Google Tasks via tools. "
             "Use tools whenever the user asks you to search the web, check/create/delete calendar events, "
-            "or draft an email. Be concise and always confirm what action was taken."
+            "draft an email, or manage their to-do tasks. Be concise and always confirm what action was taken."
         ),
     }
 
@@ -332,7 +552,7 @@ def chat() -> Response:
                 past_thinking = False
                 accumulated_content = ''
                 accumulated_tool_calls = {}  # index -> {id, function: {name, arguments}}
-
+                print(f"[llm] oMLX request: model={OMLX_MODEL} temperature={OMLX_TEMPERATURE} think={think}", flush=True)
                 with httpx.stream(
                     'POST',
                     f'{OMLX_URL}/v1/chat/completions',
