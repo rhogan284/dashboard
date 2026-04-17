@@ -76,8 +76,6 @@
   const statusText      = document.getElementById('brief-status-text');
   const statusTime      = document.getElementById('brief-status-time');
   const generateBtn     = document.getElementById('brief-generate-btn');
-  const briefContent    = document.getElementById('brief-content');
-  const briefEmpty      = document.getElementById('brief-empty');
   const historySelect   = document.getElementById('brief-history-select');
 
   historySelect.addEventListener('change', () => {

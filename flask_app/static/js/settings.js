@@ -15,7 +15,10 @@
     e.stopPropagation();
     const opening = dropdown.classList.contains('hidden');
     dropdown.classList.toggle('hidden');
-    if (opening) refreshStatus();
+    if (opening) {
+      refreshStatus();
+      loadBriefConfig();
+    }
   });
 
   document.addEventListener('click', (e) => {
@@ -148,7 +151,4 @@
     }
   }
 
-  settingsBtn.addEventListener('click', () => {
-    loadBriefConfig();
-  });
 })();
