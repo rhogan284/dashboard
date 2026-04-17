@@ -11,7 +11,7 @@ import httpx
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 from routes.llm import _search_web, _strip_thinking, OMLX_API_KEY
-from routes.utils import json_error
+from routes.utils import json_error, generate_session_title
 
 research_bp = Blueprint('research', __name__)
 
@@ -1000,28 +1000,7 @@ def get_session_title(session_id: int) -> Response:
         return jsonify({'title': 'New session'})
 
     exchange = '\n'.join(f"{r['role']}: {r['content'][:200]}" for r in rows)
-    prompt = (
-        "Generate a short (5-8 word) descriptive title for this investment research conversation. "
-        "Return only the title, no quotes, no punctuation at the end.\n\n"
-        f"{exchange}"
-    )
-
-    try:
-        resp = httpx.post(
-            f'{OMLX_URL}/v1/chat/completions',
-            headers={'Authorization': f'Bearer {OMLX_API_KEY}'},
-            json={
-                'model': OMLX_MODEL,
-                'messages': [{'role': 'user', 'content': prompt}],
-                'max_tokens': 32,
-                'temperature': OMLX_TEMPERATURE,
-            },
-            timeout=60.0,
-        )
-        resp.raise_for_status()
-        title = _strip_thinking(resp.json()['choices'][0]['message'].get('content', ''))[:100]
-    except Exception:
-        return jsonify({'title': 'Research session'})
+    title = generate_session_title(exchange, 'investment research', 'Research session')
 
     with _get_db() as conn:
         conn.execute(

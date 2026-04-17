@@ -69,6 +69,26 @@
 
   window.refreshSettingsStatus = refreshStatus;
 
+  // ── Logs ─────────────────────────────────────────────────────────────────────
+
+  const logsBtn = document.getElementById('settings-logs-btn');
+  logsBtn.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/logs?n=50');
+      const data = await res.json();
+      const text = data.lines.length ? data.lines.join('\n') : '(no log entries yet)';
+      const win = window.open('', '_blank', 'width=900,height=600');
+      win.document.write(
+        '<html><head><title>Dashboard Logs</title>' +
+        '<style>body{background:#111;color:#d1fae5;font:13px/1.5 monospace;padding:16px;white-space:pre-wrap;word-break:break-all}</style>' +
+        '</head><body>' + text.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</body></html>'
+      );
+      win.document.close();
+    } catch (e) {
+      console.error('Failed to load logs', e);
+    }
+  });
+
   // ── Connect handlers ─────────────────────────────────────────────────────────
 
   tasksBtn.addEventListener('click', () => {

@@ -3,9 +3,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, redirect, request, Response
+from flask import Blueprint, current_app, jsonify, redirect, request, Response, stream_with_context
 
 from .utils import json_error
 
@@ -183,6 +184,48 @@ def oauth_callback():
         return json_error(str(exc), 500)
 
     return redirect(_POST_AUTH_REDIRECT)
+
+
+@brief_bp.route('/api/brief/stream', methods=['GET'])
+def stream_status():
+    """SSE endpoint that pushes brief status until generation finishes."""
+    def generate():
+        last_sent: dict | None = None
+        for _ in range(150):  # max ~5 minutes at 2 s intervals
+            f = _status_file()
+            try:
+                data = json.loads(f.read_text()) if f.exists() else {'status': 'never_run', 'generated_at': None, 'error': None}
+            except Exception:
+                data = {'status': 'never_run', 'generated_at': None, 'error': None}
+            data['gmail_connected'] = _gmail_connected()
+
+            if data != last_sent:
+                yield f"data: {json.dumps(data)}\n\n"
+                last_sent = data
+
+            if data.get('status') != 'running':
+                break
+
+            time.sleep(2)
+
+    return Response(
+        stream_with_context(generate()),
+        content_type='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+
+@brief_bp.route('/api/logs', methods=['GET'])
+def get_logs():
+    n = min(int(request.args.get('n', 50)), 500)
+    log_file = Path(current_app.config['DATA_DIR']) / 'dashboard.log'
+    if not log_file.exists():
+        return jsonify({'lines': []})
+    try:
+        lines = log_file.read_text(errors='replace').splitlines()
+        return jsonify({'lines': lines[-n:]})
+    except OSError as exc:
+        return jsonify({'lines': [], 'error': str(exc)})
 
 
 @brief_bp.route('/api/brief/preview', methods=['GET'])

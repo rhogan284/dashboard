@@ -5,7 +5,6 @@
   let activeSessionId = null;
   let messages = [];
   let thinkingEnabled = true;
-  let timerInterval = null;
   let toolStatus = null;
 
   // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -25,77 +24,9 @@
   const filePathRow     = document.getElementById('research-file-path-row');
   const activityLogDiv  = document.getElementById('research-activity-log');
 
-  // ── Utilities ──────────────────────────────────────────────────────────────────
-
-  function relativeDate(isoStr) {
-    const d = new Date(isoStr);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return d.toLocaleDateString();
-  }
-
-  function scrollToBottom() {
-    scrollArea.scrollTop = scrollArea.scrollHeight;
-  }
-
-  // ── Thinking timer ─────────────────────────────────────────────────────────────
-
-  function startTimer() {
-    toolStatus = null;
-    activityLogDiv.innerHTML = '';
-    const startTime = Date.now();
-    thinkingDiv.classList.remove('hidden');
-    timerSpan.textContent = 'Thinking… 0s';
-    timerInterval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      timerSpan.textContent = `Thinking… ${elapsed}s`;
-    }, 1000);
-  }
-
-  function stopTimer() {
-    clearInterval(timerInterval);
-    timerInterval = null;
-    toolStatus = null;
-    activityLogDiv.innerHTML = '';
-    thinkingDiv.classList.add('hidden');
-    timerSpan.textContent = 'Thinking… 0s';
-  }
-
-  function logActivity(text) {
-    const line = document.createElement('div');
-    line.className = 'text-gray-500 text-xs';
-    line.textContent = `→ ${text}`;
-    activityLogDiv.appendChild(line);
-    scrollToBottom();
-  }
-
-  // ── Message rendering ──────────────────────────────────────────────────────────
-
-  function renderHistory() {
-    historyDiv.innerHTML = '';
-    for (const msg of messages) {
-      if (msg.role === 'tool') continue;
-      const bubble = document.createElement('div');
-      if (msg.role === 'user') {
-        bubble.className =
-          'self-end bg-blue-700 text-white text-sm rounded-lg px-4 py-2 max-w-[85%] whitespace-pre-wrap';
-        bubble.textContent = msg.content;
-      } else {
-        bubble.className =
-          'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] prose prose-sm prose-invert max-w-none';
-        bubble.innerHTML = DOMPurify.sanitize(marked.parse(msg.content));
-      }
-      historyDiv.appendChild(bubble);
-    }
-    scrollToBottom();
-  }
+  // ── Shared chat utilities ──────────────────────────────────────────────────────
+  const { scrollToBottom, relativeDate, startTimer, stopTimer, logActivity, renderHistory, makeStreamBubble } =
+    createChatUtils({ historyDiv, scrollArea, thinkingDiv, timerSpan, activityLogDiv });
 
   // ── Session list ───────────────────────────────────────────────────────────────
 
@@ -148,7 +79,7 @@
         if (activeSessionId === s.id) {
           activeSessionId = null;
           messages = [];
-          renderHistory();
+          renderHistory(messages);
         }
         loadSessions();
       });
@@ -172,7 +103,7 @@
       messages = data.messages
         .filter(m => m.role !== 'tool')
         .map(m => ({ role: m.role, content: m.content }));
-      renderHistory();
+      renderHistory(messages);
       errorP.classList.add('hidden');
       if (data.title === 'New session' && messages.length > 0) {
         refreshTitle();
@@ -190,7 +121,7 @@
     triggerSummarise(activeSessionId);
     activeSessionId = null;
     messages = [];
-    renderHistory();
+    renderHistory(messages);
     errorP.classList.add('hidden');
     updateActiveHighlight();
     input.focus();
@@ -208,19 +139,16 @@
     reviewBtn.textContent = 'Reviewing…';
 
     triggerSummarise(activeSessionId);
-    // Show a short placeholder bubble instead of the full prompt
     const today = new Date().toLocaleDateString('en-AU', {
       day: '2-digit', month: 'short', year: 'numeric',
     });
     messages = [{ role: 'user', content: `Portfolio Review — ${today}` }];
-    renderHistory();
+    renderHistory(messages);
+    toolStatus = null;
     startTimer();
     errorP.classList.add('hidden');
 
-    const streamBubble = document.createElement('div');
-    streamBubble.className =
-      'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] prose prose-sm prose-invert max-w-none';
-    historyDiv.appendChild(streamBubble);
+    const streamBubble = makeStreamBubble();
     scrollToBottom();
 
     let assistantContent = '';
@@ -262,17 +190,18 @@
 
       loadSessions();
       messages.push({ role: 'assistant', content: assistantContent });
-      renderHistory();
+      renderHistory(messages);
       refreshTitle();
 
     } catch (err) {
       messages.pop();
       streamBubble.remove();
-      renderHistory();
+      renderHistory(messages);
       errorP.textContent = err.message || 'Failed to start portfolio review';
       errorP.classList.remove('hidden');
     } finally {
       stopTimer();
+      toolStatus = null;
       reviewBtn.disabled = false;
       reviewBtn.textContent = 'Portfolio Review';
     }
@@ -313,16 +242,14 @@
     messages.push({ role: 'user', content: fullPrompt });
     input.value = '';
     errorP.classList.add('hidden');
-    renderHistory();
+    renderHistory(messages);
+    toolStatus = null;
     startTimer();
     submitBtn.disabled = true;
 
     const isFirstExchange = messages.length === 1;
 
-    const streamBubble = document.createElement('div');
-    streamBubble.className =
-      'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] prose prose-sm prose-invert max-w-none';
-    historyDiv.appendChild(streamBubble);
+    const streamBubble = makeStreamBubble();
 
     let assistantContent = '';
 
@@ -364,7 +291,7 @@
       }
 
       messages.push({ role: 'assistant', content: assistantContent });
-      renderHistory();
+      renderHistory(messages);
 
       if (isFirstExchange) {
         refreshTitle();
@@ -373,11 +300,12 @@
     } catch (err) {
       messages.pop();
       streamBubble.remove();
-      renderHistory();
+      renderHistory(messages);
       errorP.textContent = err.message || 'Failed to connect to backend';
       errorP.classList.remove('hidden');
     } finally {
       stopTimer();
+      toolStatus = null;
       submitBtn.disabled = false;
       input.focus();
     }

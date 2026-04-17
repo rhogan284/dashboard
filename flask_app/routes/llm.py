@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import re
 import tempfile
@@ -552,7 +553,10 @@ def chat() -> Response:
                 past_thinking = False
                 accumulated_content = ''
                 accumulated_tool_calls = {}  # index -> {id, function: {name, arguments}}
-                print(f"[llm] oMLX request: model={OMLX_MODEL} temperature={OMLX_TEMPERATURE} think={think}", flush=True)
+                logging.getLogger(__name__).debug(
+                    "[llm] oMLX request: model=%s temperature=%s think=%s",
+                    OMLX_MODEL, OMLX_TEMPERATURE, think,
+                )
                 with httpx.stream(
                     'POST',
                     f'{OMLX_URL}/v1/chat/completions',

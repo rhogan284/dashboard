@@ -56,9 +56,9 @@
     if (name === 'brief') {
       fetchStatus();
     } else {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
+      if (statusSSE) {
+        statusSSE.close();
+        statusSSE = null;
       }
     }
     if (name === 'portfolio') {
@@ -78,7 +78,7 @@
   const briefContent    = document.getElementById('brief-content');
   const briefEmpty      = document.getElementById('brief-empty');
 
-  let pollInterval = null;
+  let statusSSE = null;
   let lastGeneratedAt = null;
 
   function formatTime(isoStr) {
@@ -128,25 +128,38 @@
         return;
       }
       const data = await res.json();
-      const newGeneratedAt = data.generated_at;
-
       applyStatus(data);
-
-      // Load brief content whenever a new one is available
+      const newGeneratedAt = data.generated_at;
       if (newGeneratedAt && newGeneratedAt !== lastGeneratedAt) {
         lastGeneratedAt = newGeneratedAt;
-        if (data.status === 'success') {
-          loadBrief();
-        }
-      }
-
-      if (data.status !== 'running' && pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
+        if (data.status === 'success') loadBrief();
       }
     } catch (e) {
       console.error('Failed to fetch brief status', e);
     }
+  }
+
+  function startSSE() {
+    if (statusSSE) statusSSE.close();
+    statusSSE = new EventSource('/api/brief/stream');
+    statusSSE.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      applyStatus(data);
+      const newGeneratedAt = data.generated_at;
+      if (newGeneratedAt && newGeneratedAt !== lastGeneratedAt) {
+        lastGeneratedAt = newGeneratedAt;
+        if (data.status === 'success') loadBrief();
+      }
+      if (data.status !== 'running') {
+        statusSSE.close();
+        statusSSE = null;
+      }
+    };
+    statusSSE.onerror = () => {
+      statusSSE.close();
+      statusSSE = null;
+      fetchStatus();
+    };
   }
 
   // ── Generate button ──────────────────────────────────────────────────────────
@@ -157,8 +170,7 @@
       const data = await res.json();
       if (data.started) {
         applyStatus({ status: 'running', gmail_connected: true, generated_at: lastGeneratedAt, error: null });
-        if (pollInterval) clearInterval(pollInterval);
-        pollInterval = setInterval(fetchStatus, 3000);
+        startSSE();
       } else {
         statusText.textContent = `Failed to start: ${data.error || 'unknown error'}`;
         generateBtn.disabled = false;

@@ -1,10 +1,23 @@
+import logging
 import os
 import threading
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from flask import Flask, render_template
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / '.env')
+
+
+def _configure_logging(data_dir: Path) -> None:
+    log_file = data_dir / 'dashboard.log'
+    handler = RotatingFileHandler(log_file, maxBytes=1_000_000, backupCount=3)
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    # Also keep stderr output during development
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 
 def _preload_omlx():
@@ -39,6 +52,7 @@ def create_app(config: dict | None = None) -> Flask:
         app.config.update(config)
 
     app.config['DATA_DIR'].mkdir(exist_ok=True)
+    _configure_logging(app.config['DATA_DIR'])
 
     from routes.llm import llm_bp
     from routes.calendar import calendar_bp
@@ -71,4 +85,4 @@ def create_app(config: dict | None = None) -> Flask:
 
 if __name__ == '__main__':
     application = create_app()
-    application.run(port=8001, debug=False)
+    application.run(port=8001, debug=False, threaded=True)
