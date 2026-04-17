@@ -6,6 +6,8 @@ from pathlib import Path
 import httpx
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from .utils import json_error
+
 tasks_bp = Blueprint('tasks', __name__)
 
 TASKS_API = 'https://tasks.googleapis.com/tasks/v1'
@@ -65,7 +67,7 @@ def save_token():
 def get_tasks():
     token = _load_token()
     if not token:
-        return jsonify({'error': 'not_connected'}), 401
+        return json_error('not_connected', 401)
 
     resp = httpx.get(
         f'{TASKS_API}/lists/{TASKLIST}/tasks',
@@ -73,7 +75,7 @@ def get_tasks():
         headers=_auth_headers(token),
     )
     if not resp.is_success:
-        return jsonify({'error': 'tasks_api_error', 'status': resp.status_code}), 502
+        return json_error('tasks_api_error', 502, status=resp.status_code)
 
     tasks = resp.json().get('items', [])
     return jsonify([_normalise(t) for t in tasks])
@@ -83,12 +85,12 @@ def get_tasks():
 def create_task():
     token = _load_token()
     if not token:
-        return jsonify({'error': 'not_connected'}), 401
+        return json_error('not_connected', 401)
 
     data = request.get_json(silent=True) or {}
     text = data.get('text', '').strip()
     if not text:
-        return jsonify({'error': 'text required'}), 400
+        return json_error('text required', 400)
 
     body = {'title': text, 'status': 'needsAction'}
     due_date = data.get('due_date', '').strip()  # expects YYYY-MM-DD
@@ -101,7 +103,7 @@ def create_task():
         headers=_auth_headers(token),
     )
     if not resp.is_success:
-        return jsonify({'error': 'tasks_api_error', 'status': resp.status_code}), 502
+        return json_error('tasks_api_error', 502, status=resp.status_code)
 
     return jsonify(_normalise(resp.json())), 201
 
@@ -110,7 +112,7 @@ def create_task():
 def update_task(task_id: str):
     token = _load_token()
     if not token:
-        return jsonify({'error': 'not_connected'}), 401
+        return json_error('not_connected', 401)
 
     data = request.get_json(silent=True) or {}
     completed = bool(data.get('completed'))
@@ -124,7 +126,7 @@ def update_task(task_id: str):
         headers=_auth_headers(token),
     )
     if not resp.is_success:
-        return jsonify({'error': 'tasks_api_error', 'status': resp.status_code}), 502
+        return json_error('tasks_api_error', 502, status=resp.status_code)
 
     return jsonify(_normalise(resp.json()))
 
@@ -133,15 +135,15 @@ def update_task(task_id: str):
 def delete_task(task_id: str):
     token = _load_token()
     if not token:
-        return jsonify({'error': 'not_connected'}), 401
+        return json_error('not_connected', 401)
 
     resp = httpx.delete(
         f'{TASKS_API}/lists/{TASKLIST}/tasks/{task_id}',
         headers=_auth_headers(token),
     )
     if resp.status_code == 404:
-        return jsonify({'error': 'not found'}), 404
+        return json_error('not found', 404)
     if not resp.is_success:
-        return jsonify({'error': 'tasks_api_error', 'status': resp.status_code}), 502
+        return json_error('tasks_api_error', 502, status=resp.status_code)
 
     return Response(status=204)

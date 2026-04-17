@@ -7,6 +7,8 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, redirect, request, Response
 
+from .utils import json_error
+
 brief_bp = Blueprint('brief', __name__)
 
 SCOPES = [
@@ -80,7 +82,7 @@ def generate_brief():
     script_path = project_root / 'scripts' / 'morning_brief.py'
 
     if not script_path.exists():
-        return jsonify({'started': False, 'error': f'script not found: {script_path}'}), 500
+        return json_error(f'script not found: {script_path}', 500, started=False)
 
     # Prevent concurrent runs
     status_path = _status_file()
@@ -88,7 +90,7 @@ def generate_brief():
         try:
             current = json.loads(status_path.read_text())
             if current.get('status') == 'running':
-                return jsonify({'started': False, 'error': 'already running'}), 409
+                return json_error('already running', 409, started=False)
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -100,7 +102,7 @@ def generate_brief():
             stderr=subprocess.DEVNULL,
         )
     except Exception as exc:
-        return jsonify({'started': False, 'error': str(exc)}), 500
+        return json_error(str(exc), 500, started=False)
 
     return jsonify({'started': True})
 
@@ -109,7 +111,7 @@ def generate_brief():
 def get_auth_url():
     client_secret = _client_secret_file()
     if not client_secret.exists():
-        return jsonify({'error': 'client_secret.json not found'}), 404
+        return json_error('client_secret.json not found', 404)
 
     try:
         from google_auth_oauthlib.flow import Flow
@@ -129,7 +131,7 @@ def get_auth_url():
         if getattr(flow, 'code_verifier', None):
             verifier_file.write_text(flow.code_verifier)
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        return json_error(str(exc), 500)
 
     return jsonify({'auth_url': auth_url})
 
@@ -178,7 +180,7 @@ def oauth_callback():
             os.unlink(tmp)
             raise
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        return json_error(str(exc), 500)
 
     return redirect(_POST_AUTH_REDIRECT)
 

@@ -1,8 +1,12 @@
+import json
 import os
 import time
+from pathlib import Path
 
 import httpx
-from flask import Blueprint, jsonify
+from flask import Blueprint, current_app, jsonify
+
+from .utils import json_error
 
 weather_bp = Blueprint('weather', __name__)
 
@@ -34,6 +38,30 @@ WEATHER_CODES = {
 }
 
 
+def _cache_file() -> Path:
+    return Path(current_app.config['DATA_DIR']) / 'weather_cache.json'
+
+
+def _load_file_cache(now: float) -> dict | None:
+    try:
+        f = _cache_file()
+        if not f.exists():
+            return None
+        stored = json.loads(f.read_text())
+        if now - stored.get('ts', 0) < CACHE_TTL:
+            return stored
+    except Exception:
+        pass
+    return None
+
+
+def _write_file_cache(data: dict, ts: float) -> None:
+    try:
+        _cache_file().write_text(json.dumps({'data': data, 'ts': ts}))
+    except Exception:
+        pass
+
+
 @weather_bp.route('/api/weather')
 def get_weather():
     api_key = os.getenv('TOMORROW_API_KEY', '')
@@ -43,8 +71,18 @@ def get_weather():
         return jsonify({'error': 'Weather not configured'}), 200
 
     now = time.time()
+
+    # Memory cache (warm across requests within the same process lifetime)
     if _cache['data'] and now - _cache['ts'] < CACHE_TTL:
         return jsonify(_cache['data'])
+
+    # File cache (survives restarts)
+    if not _cache['data']:
+        stored = _load_file_cache(now)
+        if stored:
+            _cache['data'] = stored['data']
+            _cache['ts'] = stored['ts']
+            return jsonify(_cache['data'])
 
     try:
         params = {'location': location, 'units': 'metric', 'apikey': api_key}
@@ -65,6 +103,7 @@ def get_weather():
 
         _cache['data'] = data
         _cache['ts'] = now
+        _write_file_cache(data, now)
 
         return jsonify(data)
 

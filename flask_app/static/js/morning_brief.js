@@ -92,7 +92,7 @@
       const res = await fetch('/api/brief/preview?' + Date.now());
       const md = await res.text();
       if (md.trim()) {
-        briefContent.innerHTML = marked.parse(md);
+        briefContent.innerHTML = DOMPurify.sanitize(marked.parse(md));
         briefContent.classList.remove('hidden');
         briefEmpty.classList.add('hidden');
       } else {

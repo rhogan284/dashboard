@@ -6,6 +6,8 @@ from pathlib import Path
 import httpx
 from flask import Blueprint, current_app, jsonify, request
 
+from .utils import json_error
+
 calendar_bp = Blueprint('calendar', __name__)
 
 CALENDAR_API = 'https://www.googleapis.com/calendar/v3'
@@ -48,7 +50,7 @@ def save_token():
 def get_events():
     token = _load_token()
     if not token:
-        return jsonify({'error': 'not_connected'}), 401
+        return json_error('not_connected', 401)
 
     now = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
     end = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 14 * 86400))
@@ -67,6 +69,6 @@ def get_events():
     )
 
     if not response.is_success:
-        return jsonify({'error': 'calendar_api_error', 'status': response.status_code}), 502
+        return json_error('calendar_api_error', 502, status=response.status_code)
 
     return jsonify(response.json().get('items', []))

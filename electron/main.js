@@ -43,16 +43,16 @@ function startFlask() {
   });
 }
 
-function waitForFlask(url, retries = 20, interval = 300) {
+function waitForFlask(url, retries = 40, interval = 300) {
   return new Promise((resolve, reject) => {
     let attempts = 0;
     function attempt() {
       fetch(url)
         .then(() => resolve())
-        .catch(() => {
+        .catch((err) => {
           attempts++;
           if (attempts >= retries) {
-            reject(new Error(`Flask did not start after ${retries} attempts`));
+            reject(new Error(`Flask did not start after ${retries} attempts (${retries * interval / 1000}s): ${err.message}`));
           } else {
             setTimeout(attempt, interval);
           }
@@ -62,6 +62,27 @@ function waitForFlask(url, retries = 20, interval = 300) {
   });
 }
 
+function createSplash() {
+  const splash = new BrowserWindow({
+    width: 400,
+    height: 160,
+    frame: false,
+    alwaysOnTop: true,
+    webPreferences: { nodeIntegration: false },
+  });
+  splash.loadURL(
+    'data:text/html,' +
+    encodeURIComponent(
+      '<body style="background:#111827;color:#f9fafb;font-family:system-ui;' +
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+      'height:100vh;margin:0;gap:12px">' +
+      '<p style="font-size:1.1rem;margin:0">Starting Dashboard\u2026</p>' +
+      '</body>'
+    )
+  );
+  return splash;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -69,6 +90,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // webSecurity disabled so the embedded portfolio webview (port 8000) can
+      // load resources from a different origin than the main app (port 8001).
       webSecurity: false,
       webviewTag: true,
     },
@@ -88,11 +111,14 @@ function createWindow() {
 app.whenReady().then(async () => {
   startFlask();
   startPortfolio();
+  const splash = createSplash();
   try {
     await waitForFlask(FLASK_URL);
     createWindow();
+    splash.close();
   } catch (err) {
-    console.error(err.message);
+    console.error('[Startup]', err.message);
+    splash.close();
     app.quit();
   }
 });

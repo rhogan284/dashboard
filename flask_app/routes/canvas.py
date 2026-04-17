@@ -10,6 +10,7 @@ from flask import Blueprint, Response, current_app, jsonify, request, stream_wit
 
 from routes.llm import _search_web, _strip_thinking, OMLX_API_KEY
 from routes.research import _read_local_file
+from routes.utils import json_error
 
 canvas_bp = Blueprint('canvas', __name__)
 
@@ -419,7 +420,7 @@ def get_session(session_id: int):
             (session_id,),
         ).fetchone()
         if row is None:
-            return jsonify({'error': 'Session not found'}), 404
+            return json_error('Session not found', 404)
         messages = conn.execute(
             "SELECT role, content, created_at FROM canvas_messages WHERE session_id = ? ORDER BY created_at",
             (session_id,),
@@ -432,7 +433,7 @@ def update_session(session_id: int):
     data = request.get_json(silent=True) or {}
     title = str(data.get('title', '')).strip()
     if not title:
-        return jsonify({'error': 'title required'}), 400
+        return json_error('title required', 400)
     with _get_db() as conn:
         conn.execute(
             "UPDATE canvas_sessions SET title = ? WHERE id = ?",
@@ -459,7 +460,7 @@ def get_courses_route():
     try:
         return jsonify(_get_courses())
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        return json_error(str(exc), 500)
 
 
 @canvas_bp.route('/api/canvas/assignments', methods=['GET'])
@@ -468,7 +469,7 @@ def get_assignments_route():
     try:
         return jsonify(_get_assignments(course_id))
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        return json_error(str(exc), 500)
 
 
 # ---------------------------------------------------------------------------
@@ -482,15 +483,15 @@ def sync_calendar():
 
     token_path = Path(current_app.config['DATA_DIR']) / 'gcal_token.json'
     if not token_path.exists():
-        return jsonify({'error': 'Google Calendar not connected. Connect it via the Dashboard tab first.'}), 400
+        return json_error('Google Calendar not connected. Connect it via the Dashboard tab first.', 400)
 
     try:
         token_data = _json.loads(token_path.read_text())
     except Exception:
-        return jsonify({'error': 'Failed to read Google Calendar token.'}), 400
+        return json_error('Failed to read Google Calendar token.', 400)
 
     if time.time() * 1000 > token_data.get('expires_at', 0):
-        return jsonify({'error': 'Google Calendar token expired. Please reconnect via the Dashboard tab.'}), 400
+        return json_error('Google Calendar token expired. Please reconnect via the Dashboard tab.', 400)
 
     access_token = token_data.get('access_token', '')
     headers = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
@@ -498,7 +499,7 @@ def sync_calendar():
     try:
         assignments = _get_assignments()
     except Exception as exc:
-        return jsonify({'error': f'Failed to fetch Canvas assignments: {exc}'}), 500
+        return json_error(f'Failed to fetch Canvas assignments: {exc}', 500)
 
     # Fetch existing Canvas-tagged events to avoid duplicates
     now_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -588,7 +589,7 @@ def get_brief():
         assignments = _get_assignments()
         return jsonify({'markdown': _build_brief_markdown(assignments)})
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        return json_error(str(exc), 500)
 
 
 def _build_brief_markdown(assignments: list) -> str:
@@ -1124,7 +1125,7 @@ def summarise_session(session_id: int) -> Response:
         resp.raise_for_status()
         summary = _strip_thinking(resp.json()['choices'][0]['message'].get('content', ''))
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        return json_error(str(exc), 500)
 
     with _get_db() as conn:
         conn.execute(

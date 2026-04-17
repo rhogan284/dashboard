@@ -36,7 +36,7 @@
         bubble.textContent = msg.content;
       } else {
         bubble.className = 'self-start bg-gray-800 text-gray-100 text-sm rounded-lg px-4 py-2 max-w-[85%] prose prose-sm prose-invert max-w-none';
-        bubble.innerHTML = marked.parse(msg.content);
+        bubble.innerHTML = DOMPurify.sanitize(marked.parse(msg.content));
       }
       historyDiv.appendChild(bubble);
     }
@@ -114,7 +114,7 @@
             const token = data.chunk ?? data.message?.content;
             if (token) {
               assistantContent += token;
-              streamBubble.innerHTML = marked.parse(assistantContent);
+              streamBubble.innerHTML = DOMPurify.sanitize(marked.parse(assistantContent));
               scrollToBottom();
             }
           } catch (parseErr) {

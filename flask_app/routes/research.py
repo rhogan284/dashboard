@@ -11,6 +11,7 @@ import httpx
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 from routes.llm import _search_web, _strip_thinking, OMLX_API_KEY
+from routes.utils import json_error
 
 research_bp = Blueprint('research', __name__)
 
@@ -177,7 +178,7 @@ def get_session(session_id: int):
             (session_id,),
         ).fetchone()
         if row is None:
-            return jsonify({'error': 'Session not found'}), 404
+            return json_error('Session not found', 404)
         messages = conn.execute(
             "SELECT role, content, created_at FROM research_messages WHERE session_id = ? ORDER BY created_at",
             (session_id,),
@@ -190,7 +191,7 @@ def update_session(session_id: int):
     data = request.get_json(silent=True) or {}
     title = str(data.get('title', '')).strip()
     if not title:
-        return jsonify({'error': 'title required'}), 400
+        return json_error('title required', 400)
     with _get_db() as conn:
         conn.execute(
             "UPDATE research_sessions SET title = ? WHERE id = ?",
@@ -956,7 +957,7 @@ def summarise_session(session_id: int) -> Response:
         resp.raise_for_status()
         summary = _strip_thinking(resp.json()['choices'][0]['message'].get('content', ''))
     except Exception as exc:
-        return jsonify({'error': str(exc)}), 500
+        return json_error(str(exc), 500)
 
     with _get_db() as conn:
         conn.execute(
