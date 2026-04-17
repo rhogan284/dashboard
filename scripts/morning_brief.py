@@ -509,6 +509,22 @@ def write_file(path: Path, content: str):
         raise
 
 
+SECTION_KEYS = ['gmail', 'calendar', 'markets', 'canvas']
+DEFAULT_CONFIG = {k: True for k in SECTION_KEYS}
+
+
+def load_config() -> dict:
+    """Load brief_config.json; fill missing keys with True."""
+    config_path = DATA_DIR / 'brief_config.json'
+    if not config_path.exists():
+        return dict(DEFAULT_CONFIG)
+    try:
+        data = json.loads(config_path.read_text())
+        return {k: bool(data.get(k, True)) for k in SECTION_KEYS}
+    except (json.JSONDecodeError, OSError):
+        return dict(DEFAULT_CONFIG)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -519,8 +535,11 @@ def main():
 
     today = datetime.now()
     today_str = today.strftime('%A, %B %-d, %Y')
+    date_str = today.strftime('%Y-%m-%d')
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    config = load_config()
 
     write_json(DATA_DIR / 'brief_status.json', {
         'status': 'running',
@@ -532,37 +551,58 @@ def main():
     creds = load_credentials()
     tavily_client = TavilyClient(api_key=os.getenv('TAVILY_API_KEY', ''))
 
-    # Fetch all data in parallel
-    with ThreadPoolExecutor(max_workers=len(TAVILY_QUERIES) + 3) as executor:
-        gmail_future = executor.submit(fetch_gmail, creds)
-        calendar_future = executor.submit(fetch_calendar, creds)
-        canvas_future = executor.submit(fetch_canvas_brief)
-        search_futures = {
-            q: executor.submit(search_tavily, tavily_client, q)
-            for q in TAVILY_QUERIES
-        }
+    # Launch only enabled fetches in parallel
+    max_workers = sum([
+        config['gmail'],
+        config['calendar'],
+        config['canvas'],
+        len(TAVILY_QUERIES) if config['markets'] else 0,
+    ]) or 1
 
-    gmail_data = gmail_future.result()
-    calendar_data = calendar_future.result()
-    canvas_md = canvas_future.result()
-    search_results = {q: f.result() for q, f in search_futures.items()}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        gmail_future    = executor.submit(fetch_gmail, creds)     if config['gmail']    else None
+        calendar_future = executor.submit(fetch_calendar, creds)  if config['calendar'] else None
+        canvas_future   = executor.submit(fetch_canvas_brief)     if config['canvas']   else None
+        search_futures  = (
+            {q: executor.submit(search_tavily, tavily_client, q) for q in TAVILY_QUERIES}
+            if config['markets'] else {}
+        )
 
-    print(f'\n=== Gmail debug: {gmail_data["unread_count"]} unread, {len(gmail_data["messages"])} messages fetched ===', flush=True)
-    for i, msg in enumerate(gmail_data['messages'], 1):
-        print(f'  {i}. [{", ".join(msg.get("labels", []))}] {msg.get("from", "")} — {msg.get("subject", "")}', flush=True)
-    print('', flush=True)
+    sections = []
 
-    print('Summarising Gmail…', flush=True)
-    gmail_md = summarise_gmail(gmail_data)
+    if config['gmail'] and gmail_future:
+        gmail_data = gmail_future.result()
+        print(f'\n=== Gmail debug: {gmail_data["unread_count"]} unread, {len(gmail_data["messages"])} messages fetched ===', flush=True)
+        for i, msg in enumerate(gmail_data['messages'], 1):
+            print(f'  {i}. [{", ".join(msg.get("labels", []))}] {msg.get("from", "")} — {msg.get("subject", "")}', flush=True)
+        print('', flush=True)
+        print('Summarising Gmail…', flush=True)
+        sections.append(summarise_gmail(gmail_data))
 
-    print('Summarising markets…', flush=True)
-    markets_md = summarise_markets(search_results, today_str)
+    if config['calendar'] and calendar_future:
+        calendar_data = calendar_future.result()
+        sections.append(build_calendar_md(calendar_data))
+
+    if config['canvas'] and canvas_future:
+        canvas_md = canvas_future.result()
+        if canvas_md:
+            sections.append(canvas_md)
+
+    if config['markets'] and search_futures:
+        search_results = {q: f.result() for q, f in search_futures.items()}
+        print('Summarising markets…', flush=True)
+        sections.append(summarise_markets(search_results, today_str))
 
     print('Assembling brief…', flush=True)
-    calendar_md = build_calendar_md(calendar_data)
-    brief_md = assemble_brief(gmail_md, markets_md, calendar_md, today_str, canvas_md)
+    brief_md = f'# Morning Brief — {today_str}\n\n' + '\n\n'.join(sections)
 
+    # Write current brief
     write_file(DATA_DIR / 'morning_brief.md', brief_md)
+
+    # Archive copy
+    archive_dir = DATA_DIR / 'briefs'
+    archive_dir.mkdir(exist_ok=True)
+    write_file(archive_dir / f'{date_str}.md', brief_md)
 
     write_json(DATA_DIR / 'brief_status.json', {
         'status': 'success',
