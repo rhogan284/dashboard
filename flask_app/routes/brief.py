@@ -1,10 +1,11 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, date, timezone
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, redirect, request, Response, stream_with_context
@@ -287,14 +288,13 @@ def get_history():
         return jsonify([])
 
     files = sorted(briefs_dir.glob('????-??-??.md'), reverse=True)[:5]
-    today = datetime.utcnow().date()
+    today = datetime.now(timezone.utc).date()
 
     result = []
     for f in files:
         date_str = f.stem  # 'YYYY-MM-DD'
         try:
-            from datetime import date as _date
-            d = _date.fromisoformat(date_str)
+            d = date.fromisoformat(date_str)
         except ValueError:
             continue
         delta = (today - d).days
@@ -311,8 +311,7 @@ def get_history():
 
 @brief_bp.route('/api/brief/archive/<date>', methods=['GET'])
 def get_archive(date):
-    import re as _re
-    if not _re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
         return json_error('invalid date format', 400)
     md_file = _briefs_dir() / f'{date}.md'
     if not md_file.exists():

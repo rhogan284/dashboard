@@ -10,3 +10,8 @@ def app(tmp_path):
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture
+def data_dir(app):
+    return app.config['DATA_DIR']

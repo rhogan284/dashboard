@@ -112,3 +112,104 @@ def test_format_week_events_empty():
     assert format_week_events([]) == '(no events this week)'
 
 
+# ── /api/brief/history ──────────────────────────────────────────────────────
+
+def test_history_returns_empty_when_no_briefs_dir(client, data_dir):
+    """Returns [] when the briefs/ directory doesn't exist."""
+    import shutil
+    briefs_dir = data_dir / 'briefs'
+    shutil.rmtree(briefs_dir, ignore_errors=True)
+    resp = client.get('/api/brief/history')
+    assert resp.status_code == 200
+    assert resp.get_json() == []
+
+
+def test_history_returns_up_to_five_entries(client, data_dir):
+    """Returns at most 5 entries, newest first."""
+    briefs_dir = data_dir / 'briefs'
+    briefs_dir.mkdir(exist_ok=True)
+    dates = ['2026-04-10', '2026-04-11', '2026-04-12', '2026-04-13',
+             '2026-04-14', '2026-04-15']
+    for d in dates:
+        (briefs_dir / f'{d}.md').write_text(f'# Brief {d}')
+    resp = client.get('/api/brief/history')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert len(data) == 5
+    assert data[0]['date'] == '2026-04-15'  # newest first
+
+
+def test_history_entry_has_date_and_label(client, data_dir):
+    """Each entry has 'date' and 'label' keys."""
+    briefs_dir = data_dir / 'briefs'
+    briefs_dir.mkdir(exist_ok=True)
+    (briefs_dir / '2026-04-10.md').write_text('# Brief')
+    resp = client.get('/api/brief/history')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert len(data) == 1
+    assert 'date' in data[0]
+    assert 'label' in data[0]
+    assert data[0]['date'] == '2026-04-10'
+
+
+# ── /api/brief/archive/<date> ────────────────────────────────────────────────
+
+def test_archive_returns_markdown_content(client, data_dir):
+    """Returns the markdown content of the archived brief."""
+    briefs_dir = data_dir / 'briefs'
+    briefs_dir.mkdir(exist_ok=True)
+    (briefs_dir / '2026-04-10.md').write_text('# Morning Brief')
+    resp = client.get('/api/brief/archive/2026-04-10')
+    assert resp.status_code == 200
+    assert '# Morning Brief' in resp.get_data(as_text=True)
+
+
+def test_archive_returns_404_for_missing_date(client, data_dir):
+    """Returns 404 when no brief exists for the given date."""
+    resp = client.get('/api/brief/archive/2020-01-01')
+    assert resp.status_code == 404
+
+
+def test_archive_returns_400_for_invalid_date_format(client, data_dir):
+    """Returns 400 for non-date strings."""
+    resp = client.get('/api/brief/archive/not-a-date')
+    assert resp.status_code == 400
+
+
+# ── /api/brief/config ────────────────────────────────────────────────────────
+
+def test_get_config_returns_defaults_when_no_file(client, data_dir):
+    """Returns all-true defaults when brief_config.json doesn't exist."""
+    config_file = data_dir / 'brief_config.json'
+    config_file.unlink(missing_ok=True)
+    resp = client.get('/api/brief/config')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data == {'gmail': True, 'calendar': True, 'markets': True, 'canvas': True}
+
+
+def test_patch_config_merges_partial_update(client, data_dir):
+    """PATCH merges updates and ignores unknown keys."""
+    resp = client.patch(
+        '/api/brief/config',
+        json={'gmail': False, 'unknown_key': True},
+        content_type='application/json',
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['gmail'] is False
+    assert data['calendar'] is True
+    assert 'unknown_key' not in data
+
+
+def test_patch_config_persists(client, data_dir):
+    """PATCH writes the config to disk."""
+    import json as _json
+    client.patch('/api/brief/config', json={'canvas': False}, content_type='application/json')
+    config_file = data_dir / 'brief_config.json'
+    assert config_file.exists()
+    saved = _json.loads(config_file.read_text())
+    assert saved['canvas'] is False
+
+
