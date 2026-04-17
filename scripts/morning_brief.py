@@ -284,7 +284,7 @@ def fetch_calendar(creds) -> list:
 
 
 def fetch_canvas_brief() -> str:
-    """Fetch upcoming Canvas assignments and format as a markdown brief section."""
+    """Fetch upcoming (next 7 days) and overdue Canvas assignments."""
     canvas_base = os.getenv('CANVAS_BASE_URL', '').rstrip('/')
     canvas_key = os.getenv('CANVAS_KEY', '')
     if not canvas_base or not canvas_key:
@@ -317,47 +317,51 @@ def fetch_canvas_brief() -> str:
         courses = canvas_get('/courses', {'enrollment_state': 'active', 'per_page': 50})
         now = datetime.now(timezone.utc)
         week_end = now + timedelta(days=7)
-        due_this_week = []
-        overdue = []
+        due_this_week: list[tuple[str, str, datetime]] = []
+        overdue: list[tuple[str, str, datetime]] = []
 
         for course in courses:
             if not isinstance(course, dict) or not course.get('name'):
                 continue
-            try:
-                assignments = canvas_get(
-                    f'/courses/{course["id"]}/assignments',
-                    {'bucket': 'upcoming', 'order_by': 'due_at', 'per_page': 50},
-                )
-                for a in assignments:
-                    if not isinstance(a, dict) or not a.get('due_at'):
-                        continue
-                    try:
-                        due = datetime.fromisoformat(a['due_at'].replace('Z', '+00:00'))
-                    except ValueError:
-                        continue
-                    entry = (a.get('name', ''), due)
-                    if due < now:
-                        overdue.append(entry)
-                    elif due <= week_end:
-                        due_this_week.append(entry)
-            except Exception:
-                pass
+            course_name = course['name']
+            course_id = course['id']
 
-        due_this_week.sort(key=lambda x: x[1])
-        overdue.sort(key=lambda x: x[1])
+            for bucket in ('upcoming', 'overdue'):
+                try:
+                    assignments = canvas_get(
+                        f'/courses/{course_id}/assignments',
+                        {'bucket': bucket, 'order_by': 'due_at', 'per_page': 50},
+                    )
+                    for a in assignments:
+                        if not isinstance(a, dict) or not a.get('due_at'):
+                            continue
+                        try:
+                            due = datetime.fromisoformat(a['due_at'].replace('Z', '+00:00'))
+                        except ValueError:
+                            continue
+                        name = a.get('name', '(untitled)')
+                        if bucket == 'overdue':
+                            overdue.append((course_name, name, due))
+                        elif due <= week_end:
+                            due_this_week.append((course_name, name, due))
+                except Exception:
+                    pass
+
+        due_this_week.sort(key=lambda x: x[2])
+        overdue.sort(key=lambda x: x[2])
 
         lines = ['## 🎓 Academics', '']
         if due_this_week:
-            lines.append('**Due this week:**')
-            for name, due in due_this_week:
-                lines.append(f'- {name} — {due.strftime("%a %b %-d")}')
+            lines.append('**Upcoming (next 7 days):**')
+            for course_name, name, due in due_this_week:
+                lines.append(f'- [{course_name}] {name} — {due.strftime("%a %b %-d")}')
         else:
-            lines.append('**Due this week:** Nothing due')
+            lines.append('**Upcoming (next 7 days):** Nothing due')
         lines.append('')
         if overdue:
             lines.append('**Overdue:**')
-            for name, due in overdue:
-                lines.append(f'- {name} (was due {due.strftime("%b %-d")})')
+            for course_name, name, due in overdue:
+                lines.append(f'- [{course_name}] {name} — was due {due.strftime("%b %-d")}')
         else:
             lines.append('**Overdue:** None')
 
