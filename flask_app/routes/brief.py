@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, redirect, request, Response, stream_with_context
@@ -241,3 +242,102 @@ def preview_brief():
         content = ''
 
     return Response(content, content_type='text/plain; charset=utf-8')
+
+
+def _briefs_dir() -> Path:
+    return _data_dir() / 'briefs'
+
+
+def _brief_config_file() -> Path:
+    return _data_dir() / 'brief_config.json'
+
+
+_SECTION_KEYS = ['gmail', 'calendar', 'markets', 'canvas']
+_DEFAULT_CONFIG = {k: True for k in _SECTION_KEYS}
+
+
+def _load_brief_config() -> dict:
+    f = _brief_config_file()
+    if not f.exists():
+        return dict(_DEFAULT_CONFIG)
+    try:
+        data = json.loads(f.read_text())
+        return {k: bool(data.get(k, True)) for k in _SECTION_KEYS}
+    except (json.JSONDecodeError, OSError):
+        return dict(_DEFAULT_CONFIG)
+
+
+def _save_brief_config(config: dict):
+    f = _brief_config_file()
+    f.parent.mkdir(exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=f.parent)
+    try:
+        with os.fdopen(fd, 'w') as fh:
+            json.dump(config, fh)
+        os.replace(tmp, f)
+    except Exception:
+        os.unlink(tmp)
+        raise
+
+
+@brief_bp.route('/api/brief/history', methods=['GET'])
+def get_history():
+    briefs_dir = _briefs_dir()
+    if not briefs_dir.exists():
+        return jsonify([])
+
+    files = sorted(briefs_dir.glob('????-??-??.md'), reverse=True)[:5]
+    today = datetime.utcnow().date()
+
+    result = []
+    for f in files:
+        date_str = f.stem  # 'YYYY-MM-DD'
+        try:
+            from datetime import date as _date
+            d = _date.fromisoformat(date_str)
+        except ValueError:
+            continue
+        delta = (today - d).days
+        if delta == 0:
+            label = 'Today'
+        elif delta == 1:
+            label = 'Yesterday'
+        else:
+            label = d.strftime('%b %-d')
+        result.append({'date': date_str, 'label': label})
+
+    return jsonify(result)
+
+
+@brief_bp.route('/api/brief/archive/<date>', methods=['GET'])
+def get_archive(date):
+    import re as _re
+    if not _re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+        return json_error('invalid date format', 400)
+    md_file = _briefs_dir() / f'{date}.md'
+    if not md_file.exists():
+        return json_error(f'no brief for {date}', 404)
+    try:
+        content = md_file.read_text()
+    except OSError as exc:
+        return json_error(str(exc), 500)
+    return Response(content, content_type='text/plain; charset=utf-8')
+
+
+@brief_bp.route('/api/brief/config', methods=['GET'])
+def get_config():
+    return jsonify(_load_brief_config())
+
+
+@brief_bp.route('/api/brief/config', methods=['PATCH'])
+def patch_config():
+    updates = request.get_json(silent=True) or {}
+    config = _load_brief_config()
+    for key, val in updates.items():
+        if key in _SECTION_KEYS:
+            config[key] = bool(val)
+    try:
+        _save_brief_config(config)
+    except Exception as exc:
+        return json_error(str(exc), 500)
+    return jsonify(config)
