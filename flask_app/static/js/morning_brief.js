@@ -55,6 +55,7 @@
     });
     if (name === 'brief') {
       fetchStatus();
+      loadHistory();
     } else {
       if (statusSSE) {
         statusSSE.close();
@@ -77,6 +78,17 @@
   const generateBtn     = document.getElementById('brief-generate-btn');
   const briefContent    = document.getElementById('brief-content');
   const briefEmpty      = document.getElementById('brief-empty');
+  const historySelect   = document.getElementById('brief-history-select');
+
+  historySelect.addEventListener('change', () => {
+    const val = historySelect.value;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (val === 'today' || val === todayStr) {
+      loadCurrentBrief();
+    } else {
+      loadArchive(val);
+    }
+  });
 
   let statusSSE = null;
   let lastGeneratedAt = null;
@@ -87,20 +99,61 @@
     return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   }
 
-  async function loadBrief() {
+  async function loadCurrentBrief() {
     try {
-      const res = await fetch('/api/brief/preview?' + Date.now());
-      const md = await res.text();
+      const res = await fetch('/api/brief/preview');
+      const md = res.ok ? await res.text() : '';
+      const contentEl = document.getElementById('brief-content');
+      const emptyEl = document.getElementById('brief-empty');
       if (md.trim()) {
-        briefContent.innerHTML = DOMPurify.sanitize(marked.parse(md));
-        briefContent.classList.remove('hidden');
-        briefEmpty.classList.add('hidden');
+        contentEl.innerHTML = DOMPurify.sanitize(marked.parse(md));
+        contentEl.classList.remove('hidden');
+        emptyEl.classList.add('hidden');
       } else {
-        briefContent.classList.add('hidden');
-        briefEmpty.classList.remove('hidden');
+        contentEl.classList.add('hidden');
+        emptyEl.classList.remove('hidden');
       }
-    } catch (e) {
-      console.error('Failed to load brief content', e);
+    } catch {
+      // silently ignore network errors
+    }
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await fetch('/api/brief/history');
+      if (!res.ok) return;
+      const entries = await res.json();
+      if (entries.length <= 1) {
+        historySelect.classList.add('hidden');
+        return;
+      }
+      historySelect.innerHTML = '';
+      for (const entry of entries) {
+        const opt = document.createElement('option');
+        opt.value = entry.date;
+        opt.textContent = entry.label;
+        historySelect.appendChild(opt);
+      }
+      historySelect.classList.remove('hidden');
+    } catch {
+      historySelect.classList.add('hidden');
+    }
+  }
+
+  async function loadArchive(date) {
+    try {
+      const res = await fetch(`/api/brief/archive/${date}`);
+      if (!res.ok) return;
+      const md = await res.text();
+      const contentEl = document.getElementById('brief-content');
+      const emptyEl = document.getElementById('brief-empty');
+      if (md.trim()) {
+        contentEl.innerHTML = DOMPurify.sanitize(marked.parse(md));
+        contentEl.classList.remove('hidden');
+        emptyEl.classList.add('hidden');
+      }
+    } catch {
+      // silently ignore
     }
   }
 
@@ -132,7 +185,7 @@
       const newGeneratedAt = data.generated_at;
       if (newGeneratedAt && newGeneratedAt !== lastGeneratedAt) {
         lastGeneratedAt = newGeneratedAt;
-        if (data.status === 'success') loadBrief();
+        if (data.status === 'success') loadCurrentBrief();
       }
     } catch (e) {
       console.error('Failed to fetch brief status', e);
@@ -148,7 +201,7 @@
       const newGeneratedAt = data.generated_at;
       if (newGeneratedAt && newGeneratedAt !== lastGeneratedAt) {
         lastGeneratedAt = newGeneratedAt;
-        if (data.status === 'success') loadBrief();
+        if (data.status === 'success') loadCurrentBrief();
       }
       if (data.status !== 'running') {
         statusSSE.close();

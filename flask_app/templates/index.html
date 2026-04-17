@@ -187,9 +187,15 @@
   <div id="tab-brief" class="hidden flex-1 overflow-y-auto bg-gray-950">
     <div class="max-w-3xl mx-auto px-6 py-8">
 
-      <!-- Page title + generate button -->
+      <!-- Page title + controls -->
       <div class="flex items-center justify-between mb-6">
-        <h1 class="text-xl font-semibold text-white">Morning Brief</h1>
+        <div class="flex items-center gap-3">
+          <h1 class="text-xl font-semibold text-white">Morning Brief</h1>
+          <select id="brief-history-select"
+            class="hidden bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="today">Today</option>
+          </select>
+        </div>
         <button id="brief-generate-btn"
           class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
           Generate Now
