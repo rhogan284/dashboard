@@ -297,7 +297,7 @@ def get_history():
         return jsonify([])
 
     files = sorted(briefs_dir.glob('????-??-??.md'), reverse=True)[:5]
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now().date()  # local time — matches how brief files are named
 
     result = []
     for f in files:

@@ -80,7 +80,8 @@
 
   historySelect.addEventListener('change', () => {
     const val = historySelect.value;
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const d = new Date();
+    const todayStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     if (val === 'today' || val === todayStr) {
       loadCurrentBrief();
     } else {
