@@ -295,8 +295,9 @@ def fetch_canvas_brief() -> str:
     def canvas_get(path: str, params: dict | None = None) -> list:
         url = f'{canvas_base}/api/v1{path}'
         results = []
+        _timeout = httpx.Timeout(connect=5.0, read=20.0, write=5.0, pool=5.0)
         while url:
-            resp = httpx.get(url, headers=headers, params=params, timeout=20.0)
+            resp = httpx.get(url, headers=headers, params=params, timeout=_timeout)
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, list):

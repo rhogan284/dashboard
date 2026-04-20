@@ -97,6 +97,15 @@ def generate_brief():
         except (json.JSONDecodeError, OSError):
             pass
 
+    # Write running status synchronously so SSE sees it immediately
+    try:
+        fd, tmp = tempfile.mkstemp(dir=status_path.parent)
+        with os.fdopen(fd, 'w') as f:
+            json.dump({'status': 'running', 'generated_at': None, 'error': None, 'gmail_connected': False}, f)
+        os.replace(tmp, status_path)
+    except Exception:
+        pass
+
     try:
         subprocess.Popen(
             [sys.executable, str(script_path)],

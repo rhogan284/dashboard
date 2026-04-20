@@ -121,7 +121,7 @@
       const res = await fetch('/api/brief/history');
       if (!res.ok) return;
       const entries = await res.json();
-      if (entries.length <= 1) {
+      if (entries.length === 0) {
         historySelect.classList.add('hidden');
         return;
       }
