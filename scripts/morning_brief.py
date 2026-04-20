@@ -396,10 +396,10 @@ def _call_omlx(prompt: str) -> str:
         headers={'Authorization': f'Bearer {api_key}'},
         json={
             'model': model,
-            'messages': [{'role': 'user', 'content': prompt}],
+            'messages': [{'role': 'user', 'content': f'<|think|>{prompt}'}],
             'max_tokens': 4096,
         },
-        timeout=300.0,
+        timeout=600.0,
     )
     response.raise_for_status()
     raw = response.json()['choices'][0]['message']['content'].strip()
