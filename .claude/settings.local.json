@@ -72,7 +72,10 @@
       "Bash(ollama ps:*)",
       "Bash(curl -s -X POST http://localhost:11434/api/chat -H 'Content-Type: application/json' -d '{\"model\":\"qwen3.5:latest\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"stream\":false}')",
       "Bash(journalctl --user -u ollama -n 100)",
-      "Bash(brew info:*)"
+      "Bash(brew info:*)",
+      "Bash(python -c ' *)",
+      "Bash(node --check flask_app/static/js/morning_brief.js)",
+      "Bash(python -m pytest tests/ -v)"
     ]
   }
 }

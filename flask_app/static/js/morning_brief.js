@@ -18,12 +18,28 @@
 
   function loadPortfolio() {
     if (portfolioLoaded) return;
-    portfolioWebview.src = 'http://localhost:8000/portfolio';
-    portfolioWebview.addEventListener('did-finish-load', () => {
+    portfolioLoaded = 'loading';
+
+    function onLoaded() {
       portfolioLoading.style.display = 'none';
       portfolioWebview.style.display = 'flex';
       portfolioLoaded = true;
+    }
+
+    function onFailed() {
+      // Portfolio app not ready yet — retry after a short delay
+      setTimeout(() => {
+        portfolioWebview.src = 'http://localhost:8000/portfolio';
+      }, 1500);
+    }
+
+    portfolioWebview.addEventListener('did-finish-load', onLoaded, { once: true });
+    portfolioWebview.addEventListener('did-fail-load', onFailed);
+    portfolioWebview.addEventListener('did-finish-load', () => {
+      portfolioWebview.removeEventListener('did-fail-load', onFailed);
     }, { once: true });
+
+    portfolioWebview.src = 'http://localhost:8000/portfolio';
   }
 
   let currentTab = 'dashboard';
